@@ -17,6 +17,46 @@ defmodule Test.Acceptance.OpenApiTest do
     end
   end
 
+  defmodule Circle do
+    use Ash.Resource,
+      data_layer: :embedded
+
+    attributes do
+      attribute(:radius, :integer, public?: true, allow_nil?: false)
+    end
+  end
+
+  defmodule Square do
+    use Ash.Resource,
+      data_layer: :embedded
+
+    attributes do
+      attribute(:length, :integer, public?: true, allow_nil?: false)
+    end
+  end
+
+  defmodule ShapeType do
+    use Ash.Type.NewType,
+      subtype_of: :union,
+      constraints: [
+        types: [
+          circle: [
+            type: Circle,
+            tag: :type,
+            tag_value: :circle
+          ],
+          square: [
+            type: Square,
+            tag: :type,
+            tag_value: :square
+          ],
+          note: [
+            type: :string
+          ]
+        ]
+      ]
+  end
+
   defmodule Foo do
     use Ash.Resource, domain: nil, extensions: AshJsonApi.Resource
 
@@ -128,6 +168,38 @@ defmodule Test.Acceptance.OpenApiTest do
         destination_attribute: :author_id,
         public?: true
       )
+    end
+  end
+
+  defmodule Content do
+    use Ash.Resource,
+      domain: Test.Acceptance.OpenApiTest.Blogs,
+      data_layer: Ash.DataLayer.Ets,
+      extensions: [
+        AshJsonApi.Resource
+      ]
+
+    ets do
+      private?(true)
+    end
+
+    json_api do
+      type("content")
+
+      routes do
+        base("/contents")
+        get(:read)
+        index(:read)
+      end
+    end
+
+    actions do
+      defaults([:create, :read, :update, :destroy])
+    end
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:shape, ShapeType, public?: true, allow_nil?: false)
     end
   end
 
@@ -280,6 +352,7 @@ defmodule Test.Acceptance.OpenApiTest do
     resources do
       resource(Post)
       resource(Author)
+      resource(Content)
       resource(Tag)
       resource(AuthorNoFilter)
     end
@@ -334,9 +407,9 @@ defmodule Test.Acceptance.OpenApiTest do
   end
 
   test "API routes are mapped to OpenAPI Operations", %{open_api_spec: %OpenApi{} = api_spec} do
-    assert map_size(api_spec.paths) == 13
+    assert map_size(api_spec.paths) == 15
 
-    assert %{"/authors" => _, "/authors/{id}" => _, "/posts" => _, "/posts/{id}" => _} =
+    assert %{"/authors" => _, "/authors/{id}" => _, "/posts" => _, "/posts/{id}" => _, "/contents" => _, "/contents/{id}" => _} =
              api_spec.paths
 
     assert %Operation{} = api_spec.paths["/authors"].get
@@ -348,6 +421,9 @@ defmodule Test.Acceptance.OpenApiTest do
     assert %Operation{} = api_spec.paths["/posts/{id}"].get
     assert %Operation{} = api_spec.paths["/posts"].post
     assert nil == api_spec.paths["/posts/{id}"].patch
+
+    assert %Operation{} = api_spec.paths["/contents"].get
+    assert %Operation{} = api_spec.paths["/contents/{id}"].get
   end
 
   test "generic routes have properly specified returns", %{open_api_spec: %OpenApi{} = api_spec} do
@@ -997,6 +1073,47 @@ defmodule Test.Acceptance.OpenApiTest do
       response = operation.responses[201]
       schema = response.content["application/vnd.api+json"].schema
       assert schema.properties.data."$ref" == "#/components/schemas/post"
+    end
+  end
+
+  describe "Union type discriminator" do
+    test "tagged union includes discriminator in the schema", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      content_schema = api_spec.components.schemas["content"]
+      shape_attr = content_schema.properties.attributes.properties["shape"]
+
+      assert %{"oneOf" => one_of, "discriminator" => discriminator} = shape_attr
+      assert discriminator["propertyName"] == "type"
+      assert length(one_of) == 3
+    end
+
+    test "tagged union variants include the discriminator field as enum property", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      content_schema = api_spec.components.schemas["content"]
+      shape_attr = content_schema.properties.attributes.properties["shape"]
+      %{"oneOf" => one_of} = shape_attr
+
+      circle_variant = Enum.find(one_of, &match?(%{required: req} when is_list(req), &1))
+      assert circle_variant
+      assert "type" in circle_variant.required
+      assert circle_variant.properties["type"] == %{"enum" => ["circle"], "type" => "string"}
+    end
+
+    test "untagged union variant is included without the discriminator field", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      content_schema = api_spec.components.schemas["content"]
+      shape_attr = content_schema.properties.attributes.properties["shape"]
+      %{"oneOf" => one_of} = shape_attr
+
+      string_variant = Enum.find(one_of, fn
+        %{type: :string} -> true
+        %{"type" => "string"} -> true
+        _ -> false
+      end)
+      assert string_variant
     end
   end
 end

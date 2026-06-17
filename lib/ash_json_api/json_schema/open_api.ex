@@ -657,8 +657,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
           acc,
           format
         ) do
+      tag_field = Enum.find_value(constraints[:types] || [], fn
+        {_name, config} ->
+          if config[:tag_value] do
+            config[:tag]
+          end
+      end)
+
       {subtypes, acc} =
-        Enum.reduce(constraints[:types], {[], acc}, fn {_name, config}, {list, acc} ->
+        Enum.reduce(constraints[:types], {[], acc}, fn {_name, config}, {types, acc} ->
           fake_attr =
             %{
               attr
@@ -670,15 +677,34 @@ if Code.ensure_loaded?(OpenApiSpex) do
           {schema, acc} =
             resource_write_attribute_type(fake_attr, resource, action_type, acc, format)
 
-          {[schema | list], acc}
+          schema =
+            case {tag_field, config[:tag_value]} do
+              {tag, value} when not is_nil(tag) and not is_nil(value) ->
+                add_tag_to_variant_schema(schema, to_string(tag), to_string(value))
+
+              _ ->
+                schema
+            end
+
+          {[schema | types], acc}
         end)
 
+      subtypes = Enum.reverse(subtypes)
+
       schema_with_description =
-        %{
-          "anyOf" => Enum.reverse(subtypes)
-        }
-        |> unwrap_any_of()
-        |> with_attribute_description(attr)
+        case tag_field do
+          nil ->
+            %{"anyOf" => subtypes}
+            |> unwrap_any_of()
+            |> with_attribute_description(attr)
+
+          _ ->
+            %{
+              "oneOf" => subtypes,
+              "discriminator" => %{"propertyName" => to_string(tag_field)}
+            }
+            |> with_attribute_description(attr)
+        end
 
       {schema_with_description, acc}
     end
@@ -900,6 +926,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
            acc,
            format
          ) do
+      tag_field =
+        Enum.find_value(constraints[:types] || [], fn
+          {_name, config} ->
+            if config[:tag_value] do
+              config[:tag]
+            end
+        end)
+
       {subtypes, acc} =
         Enum.reduce(constraints[:types], {[], acc}, fn {_name, config}, {types, acc} ->
           fake_attr =
@@ -911,15 +945,35 @@ if Code.ensure_loaded?(OpenApiSpex) do
             |> Map.put(:description, config[:description] || nil)
 
           {schema, acc} = resource_attribute_type(fake_attr, resource, acc, format)
+
+          schema =
+            case {tag_field, config[:tag_value]} do
+              {tag, value} when not is_nil(tag) and not is_nil(value) ->
+                add_tag_to_variant_schema(schema, to_string(tag), to_string(value))
+
+              _ ->
+                schema
+            end
+
           {[schema | types], acc}
         end)
 
+      subtypes = Enum.reverse(subtypes)
+
       result =
-        %{
-          "anyOf" => Enum.reverse(subtypes)
-        }
-        |> unwrap_any_of()
-        |> with_attribute_description(attr)
+        case tag_field do
+          nil ->
+            %{"anyOf" => subtypes}
+            |> unwrap_any_of()
+            |> with_attribute_description(attr)
+
+          _ ->
+            %{
+              "oneOf" => subtypes,
+              "discriminator" => %{"propertyName" => to_string(tag_field)}
+            }
+            |> with_attribute_description(attr)
+        end
 
       {result, acc}
     end
@@ -1270,6 +1324,38 @@ if Code.ensure_loaded?(OpenApiSpex) do
         {ref_schema, final_acc}
       else
         {schema, acc}
+      end
+    end
+
+    defp add_tag_to_variant_schema(schema, tag_field_name, tag_value) do
+      tag_property = %{"type" => "string", "enum" => [tag_value]}
+
+      cond do
+        is_map(schema) && Map.has_key?(schema, "$ref") ->
+          %{
+            "allOf" => [
+              schema,
+              %{
+                "type" => "object",
+                "properties" => %{tag_field_name => tag_property},
+                "required" => [tag_field_name]
+              }
+            ]
+          }
+
+        match?(%Schema{}, schema) ->
+          %{schema |
+            properties: Map.put(schema.properties || %{}, tag_field_name, tag_property),
+            required: Enum.uniq((schema.required || []) ++ [tag_field_name])
+          }
+
+        is_map(schema) && is_map(Map.get(schema, "properties")) ->
+          schema
+          |> Map.put("properties", Map.put(schema["properties"], tag_field_name, tag_property))
+          |> Map.put("required", Enum.uniq(Map.get(schema, "required", []) ++ [tag_field_name]))
+
+        true ->
+          schema
       end
     end
 
