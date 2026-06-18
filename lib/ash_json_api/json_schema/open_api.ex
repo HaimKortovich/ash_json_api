@@ -2747,7 +2747,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 uniqueItems: true
               },
               included: included_resource_schemas(resource),
+              links: %Schema{
+                type: :object,
+                additionalProperties: true
+              },
               meta: %Schema{
+                type: :object,
+                additionalProperties: true
+              },
+              jsonapi: %Schema{
                 type: :object,
                 additionalProperties: true
               }
@@ -2783,7 +2791,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
             properties: %{
               data: item_reference(route, resource),
               included: included_resource_schemas(resource),
+              links: %Schema{
+                type: :object,
+                additionalProperties: true
+              },
               meta: %Schema{
+                type: :object,
+                additionalProperties: true
+              },
+              jsonapi: %Schema{
                 type: :object,
                 additionalProperties: true
               }
