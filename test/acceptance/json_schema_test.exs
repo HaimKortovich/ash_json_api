@@ -220,36 +220,14 @@ defmodule Test.Acceptance.JsonSchemaTest do
       tree_attributes = tree_schema.properties.attributes
       root_property = tree_attributes.properties["root"]
 
-      # Should be an anyOf with the reference and null (because the attribute allows nil)
-      assert Map.has_key?(root_property, "anyOf")
-      any_of = root_property["anyOf"]
-      assert length(any_of) == 2
-
-      # First item should be the node schema (inline)
-      node_schema =
-        Enum.find(any_of, fn item ->
-          match?(%OpenApiSpex.Schema{}, item) && item.type == :object
-        end)
-
-      assert node_schema != nil
-      assert node_schema.type == :object
+      # Should be nullable (because the attribute allows nil)
+      assert root_property.nullable == true
+      assert root_property.type == :object
 
       # The child property within the node schema should reference the node schema
-      child_property = node_schema.properties["child"]
-      assert Map.has_key?(child_property, "anyOf")
-      child_any_of = child_property["anyOf"]
-
-      # Find the $ref in the child's anyOf
-      ref_schema = Enum.find(child_any_of, &Map.has_key?(&1, "$ref"))
-      assert ref_schema["$ref"] == "#/components/schemas/node-type"
-
-      # Second item should be null type
-      null_schema =
-        Enum.find(any_of, fn item ->
-          is_map(item) && not match?(%OpenApiSpex.Schema{}, item) && item["type"] == "null"
-        end)
-
-      assert null_schema["type"] == "null"
+      child_property = root_property.properties["child"]
+      assert child_property["$ref"] == "#/components/schemas/node-type"
+      assert child_property["nullable"] == true
     end
 
     test "handles recursive embedded inputs for create/update operations without infinite loop" do

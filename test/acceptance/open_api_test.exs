@@ -475,7 +475,7 @@ defmodule Test.Acceptance.OpenApiTest do
                type: :object,
                required: [:b],
                properties: %{
-                 a: %{"anyOf" => [%Schema{type: :integer}, %{"type" => "null"}]},
+                 a: %Schema{type: :integer, nullable: true},
                  b: %Schema{type: :string}
                },
                additionalProperties: false
@@ -589,7 +589,7 @@ defmodule Test.Acceptance.OpenApiTest do
       assert schema = api_spec.components.schemas["post-filter"]
 
       assert schema == %Schema{
-               type: :deepObject,
+               type: :object,
                description: "Filters the query to results matching the given filter object",
                properties: %{
                  author: %Reference{"$ref": "#/components/schemas/author-filter"},
@@ -787,43 +787,28 @@ defmodule Test.Acceptance.OpenApiTest do
                    attributes: %Schema{
                      required: [],
                      type: :object,
-                     properties: %{
-                       "name" => %{
-                         "anyOf" => [
-                           %Schema{
-                             type: :string,
-                             nullable: true
-                           },
-                           %{"type" => "null"}
-                         ],
-                         "description" => "The name of the author. Field included by default."
-                       },
-                       "bio" => %{
-                         "anyOf" => [
-                           %Schema{
-                             required: [],
-                             type: :object,
-                             properties: %{
-                               "history" => %{
-                                 "anyOf" => [
-                                   %Schema{
-                                     type: :string,
-                                     nullable: true
-                                   },
-                                   %{"type" => "null"}
-                                 ],
-                                 "description" =>
-                                   "The history of the author. Field included by default."
-                               }
-                             },
-                             nullable: true,
-                             additionalProperties: false
-                           },
-                           %{"type" => "null"}
-                         ],
-                         "description" => "The bio of the author. Field included by default."
-                       }
-                     },
+                      properties: %{
+                        "name" => %Schema{
+                          type: :string,
+                          nullable: true,
+                          description: "The name of the author. Field included by default."
+                        },
+                        "bio" => %Schema{
+                          required: [],
+                          type: :object,
+                          properties: %{
+                            "history" => %Schema{
+                              type: :string,
+                              nullable: true,
+                              description:
+                                "The history of the author. Field included by default."
+                            }
+                          },
+                          nullable: true,
+                          additionalProperties: false,
+                          description: "The bio of the author. Field included by default."
+                        }
+                      },
                      additionalProperties: false,
                      description: "An attributes object for a author"
                    },
@@ -881,47 +866,36 @@ defmodule Test.Acceptance.OpenApiTest do
                  attributes: %Schema{
                    required: ["name", "author_id"],
                    type: :object,
-                   properties: %{
-                     "hidden" => %{
-                       "anyOf" => [
-                         %Schema{
-                           type: :string,
-                           nullable: true
-                         },
-                         %{"type" => "null"}
-                       ],
-                       "description" =>
-                         "description of attribute :hidden. Field included by default."
-                     },
-                     "name" => %Schema{
-                       type: :string,
-                       description: "description of attribute :name. Field included by default."
-                     },
-                     "name_twice" => %{
-                       "anyOf" => [
-                         %Schema{type: :string, nullable: true},
-                         %{"type" => "null"}
-                       ]
-                     },
-                     "author_id" => %Schema{
-                       type: :string,
-                       description: "Field included by default.",
-                       format: "uuid"
-                     },
-                     "email" => %{
-                       "anyOf" => [
-                         %Schema{
-                           type: :string,
-                           nullable: true
-                         },
-                         %{"type" => "null"}
-                       ],
-                       "description" => "Field included by default."
-                     },
-                     "count_of_tags" => %{
-                       "anyOf" => [%Schema{type: :integer}, %{"type" => "null"}]
-                     }
-                   },
+                    properties: %{
+                      "hidden" => %Schema{
+                        type: :string,
+                        nullable: true,
+                        description:
+                          "description of attribute :hidden. Field included by default."
+                      },
+                      "name" => %Schema{
+                        type: :string,
+                        description: "description of attribute :name. Field included by default."
+                      },
+                      "name_twice" => %Schema{
+                        type: :string,
+                        nullable: true
+                      },
+                      "author_id" => %Schema{
+                        type: :string,
+                        description: "Field included by default.",
+                        format: "uuid"
+                      },
+                      "email" => %Schema{
+                        type: :string,
+                        nullable: true,
+                        description: "Field included by default."
+                      },
+                      "count_of_tags" => %Schema{
+                        type: :integer,
+                        nullable: true
+                      }
+                    },
                    additionalProperties: false,
                    description: "An attributes object for a post"
                  },

@@ -255,19 +255,12 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp resource_filter_schemas(domains, resource, acc) do
       {field_types, acc} = filter_field_types(resource, acc)
 
-      filter_schema_type =
-        if Application.get_env(:ash_json_api, :use_deep_object_for_filter_type?, true) do
-          :deepObject
-        else
-          :object
-        end
-
       schemas =
         [
           {
             "#{AshJsonApi.Resource.Info.type(resource)}-filter",
             %Schema{
-              type: filter_schema_type,
+              type: :object,
               properties: resource_filter_fields(resource, domains),
               example: "",
               additionalProperties: false,
@@ -3429,32 +3422,11 @@ if Code.ensure_loaded?(OpenApiSpex) do
             if Enum.member?(required, key) do
               Map.put(acc, key, value)
             else
-              {description, value} =
-                case value do
-                  value when is_struct(value) ->
-                    {Map.get(value, :description), Map.put(value, :description, nil)}
-
-                  value ->
-                    {Map.get(value, "description", Map.get(value, :description)),
-                     Map.drop(value, [:description, "description"])}
-                end
-
               new_value =
-                %{
-                  "anyOf" => [
-                    %{
-                      "type" => "null"
-                    },
-                    value
-                  ]
-                }
-                |> then(fn new_value ->
-                  case description do
-                    nil -> new_value
-                    description -> Map.put(new_value, "description", description)
-                  end
-                end)
-                |> unwrap_any_of()
+                case value do
+                  %Schema{} = s -> %{s | nullable: true}
+                  value when is_map(value) -> Map.put(value, "nullable", true)
+                end
 
               Map.put(
                 acc,
