@@ -319,6 +319,10 @@ defmodule Test.Acceptance.OpenApiTest do
         AshJsonApi.Resource
       ]
 
+    json_api do
+      type("tag")
+    end
+
     ets do
       private?(true)
     end
@@ -592,17 +596,14 @@ defmodule Test.Acceptance.OpenApiTest do
                type: :object,
                description: "Filters the query to results matching the given filter object",
                properties: %{
-                 author: %Reference{"$ref": "#/components/schemas/author-filter"},
-                 author_id: %Reference{
-                   "$ref": "#/components/schemas/post-filter-author_id"
-                 },
-                 count_of_tags: %Reference{
-                   "$ref": "#/components/schemas/post-filter-count_of_tags"
-                 },
-                 email: %Reference{"$ref": "#/components/schemas/post-filter-email"},
-                 hidden: %Reference{"$ref": "#/components/schemas/post-filter-hidden"},
-                 id: %Reference{"$ref": "#/components/schemas/post-filter-id"},
-                 name: %Reference{"$ref": "#/components/schemas/post-filter-name"},
+                author: %Reference{"$ref": "#/components/schemas/author-filter"},
+                author_id: %Reference{"$ref": "#/components/schemas/post-filter-author_id"},
+                count_of_tags: %Reference{"$ref": "#/components/schemas/post-filter-count_of_tags"},
+                email: %Reference{"$ref": "#/components/schemas/post-filter-email"},
+                hidden: %Reference{"$ref": "#/components/schemas/post-filter-hidden"},
+                id: %Reference{"$ref": "#/components/schemas/post-filter-id"},
+                name: %Reference{"$ref": "#/components/schemas/post-filter-name"},
+                tags: %Reference{"$ref": "#/components/schemas/tag-filter"},
                  and: %Schema{
                    type: :array,
                    items: %Reference{
@@ -904,33 +905,56 @@ defmodule Test.Acceptance.OpenApiTest do
                  relationships: %Schema{
                    type: :object,
                    properties: %{
-                     author: %Schema{
-                       properties: %{
-                         data: %Schema{
-                           required: [:type, :id],
-                           type: :object,
-                           properties: %{
-                             id: %Schema{type: :string},
-                             meta: %Schema{
-                               type: :object,
-                               additionalProperties: true
-                             },
-                             type: %Schema{type: :string}
-                           },
-                           additionalProperties: false,
-                           description: "An identifier for author",
-                           nullable: true
-                         }
-                       }
-                     }
-                   },
-                   additionalProperties: false,
-                   description: "A relationships object for a post"
-                 }
-               },
-               additionalProperties: false,
-               description: "A \"Resource object\" representing a post"
-             }
+                      author: %Schema{
+                        properties: %{
+                          data: %Schema{
+                            required: [:type, :id],
+                            type: :object,
+                            properties: %{
+                              id: %Schema{type: :string},
+                              meta: %Schema{
+                                type: :object,
+                                additionalProperties: true
+                              },
+                              type: %Schema{type: :string}
+                            },
+                            additionalProperties: false,
+                            description: "An identifier for author",
+                            nullable: true
+                          }
+                        }
+                      },
+                      tags: %Schema{
+                        properties: %{
+                          data: %Schema{
+                            uniqueItems: true,
+                            type: :array,
+                            items: %{
+                              type: :object,
+                              description: "Resource identifiers for tags",
+                              required: [:type, :id],
+                              properties: %{
+                                id: %Schema{type: :string},
+                                meta: %Schema{
+                                  type: :object,
+                                  additionalProperties: true
+                                },
+                                type: %Schema{type: :string}
+                              },
+                              additionalProperties: false
+                            },
+                            description: "Relationship data for tags"
+                          }
+                        }
+                      }
+                    },
+                    additionalProperties: false,
+                    description: "A relationships object for a post"
+                  }
+                },
+                additionalProperties: false,
+                description: "A \"Resource object\" representing a post"
+              }
     end
   end
 
@@ -982,7 +1006,9 @@ defmodule Test.Acceptance.OpenApiTest do
       schema = response.content["application/vnd.api+json"].schema
       assert schema.properties.data."$ref" == "#/components/schemas/post"
       assert schema.properties.included.type == :array
-      assert schema.properties.included.items.oneOf == []
+      assert schema.properties.included.items.oneOf == [
+               %Reference{"$ref": "#/components/schemas/tag"}
+             ]
     end
 
     test "Response body schema with includes", %{open_api_spec: %OpenApi{} = api_spec} do
@@ -992,7 +1018,8 @@ defmodule Test.Acceptance.OpenApiTest do
       assert schema.properties.data."$ref" == "#/components/schemas/author"
 
       assert schema.properties.included.items.oneOf == [
-               %Reference{"$ref": "#/components/schemas/post"}
+               %Reference{"$ref": "#/components/schemas/post"},
+               %Reference{"$ref": "#/components/schemas/tag"}
              ]
     end
   end

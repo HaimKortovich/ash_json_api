@@ -2848,12 +2848,17 @@ if Code.ensure_loaded?(OpenApiSpex) do
           %Reference{"$ref": "#/components/schemas/#{AshJsonApi.Resource.Info.type(resource)}"}
         end)
 
+      items =
+        if include_schemas == [] do
+          %Schema{}
+        else
+          %Schema{oneOf: include_schemas}
+        end
+
       %Schema{
         type: :array,
         uniqueItems: true,
-        items: %Schema{
-          oneOf: include_schemas
-        }
+        items: items
       }
     end
 
