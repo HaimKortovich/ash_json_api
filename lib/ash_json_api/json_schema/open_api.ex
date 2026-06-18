@@ -359,7 +359,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
           type: %Schema{type: :string},
           id: %{type: :string},
           attributes: attributes_schema,
-          relationships: relationships(resource)
+          relationships: relationships(resource),
+          links: %Schema{
+            type: :object,
+            additionalProperties: true
+          },
+          meta: %Schema{
+            type: :object,
+            additionalProperties: true
+          }
         },
         additionalProperties: false
       }

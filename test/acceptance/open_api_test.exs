@@ -815,40 +815,48 @@ defmodule Test.Acceptance.OpenApiTest do
                    },
                    id: %{type: :string},
                    type: %Schema{type: :string},
-                   relationships: %Schema{
-                     type: :object,
-                     properties: %{
-                       posts: %Schema{
-                         properties: %{
-                           data: %Schema{
-                             uniqueItems: true,
-                             type: :array,
-                             items: %{
-                               type: :object,
-                               description: "Resource identifiers for posts",
-                               required: [:type, :id],
-                               properties: %{
-                                 id: %Schema{type: :string},
-                                 meta: %Schema{
-                                   type: :object,
-                                   additionalProperties: true
-                                 },
-                                 type: %Schema{type: :string}
-                               },
-                               additionalProperties: false
-                             },
-                             description: "Relationship data for posts"
-                           }
-                         }
-                       }
-                     },
-                     additionalProperties: false,
-                     description: "A relationships object for a author"
-                   }
-                 },
-                 additionalProperties: false,
-                 description: "This is an author!"
-               }
+                  relationships: %Schema{
+                      type: :object,
+                      properties: %{
+                        posts: %Schema{
+                          properties: %{
+                            data: %Schema{
+                              uniqueItems: true,
+                              type: :array,
+                              items: %{
+                                type: :object,
+                                description: "Resource identifiers for posts",
+                                required: [:type, :id],
+                                properties: %{
+                                  id: %Schema{type: :string},
+                                  meta: %Schema{
+                                    type: :object,
+                                    additionalProperties: true
+                                  },
+                                  type: %Schema{type: :string}
+                                },
+                                additionalProperties: false
+                              },
+                              description: "Relationship data for posts"
+                            }
+                          }
+                        }
+                      },
+                      additionalProperties: false,
+                      description: "A relationships object for a author"
+                    },
+                    links: %Schema{
+                      type: :object,
+                      additionalProperties: true
+                    },
+                    meta: %Schema{
+                      type: :object,
+                      additionalProperties: true
+                    }
+                  },
+                  additionalProperties: false,
+                  description: "This is an author!"
+                }
     end
 
     test "Response body schema", %{open_api_spec: %OpenApi{} = api_spec} do
@@ -950,6 +958,14 @@ defmodule Test.Acceptance.OpenApiTest do
                     },
                     additionalProperties: false,
                     description: "A relationships object for a post"
+                  },
+                  links: %Schema{
+                    type: :object,
+                    additionalProperties: true
+                  },
+                  meta: %Schema{
+                    type: :object,
+                    additionalProperties: true
                   }
                 },
                 additionalProperties: false,
