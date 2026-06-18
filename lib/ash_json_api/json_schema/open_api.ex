@@ -1395,13 +1395,22 @@ if Code.ensure_loaded?(OpenApiSpex) do
         match?(%Schema{}, schema) ->
           %{schema |
             properties: Map.put(schema.properties || %{}, tag_field_name, tag_property),
-            required: Enum.uniq((schema.required || []) ++ [tag_field_name])
+            required:
+              (schema.required || [])
+              |> Enum.map(&to_string/1)
+              |> Kernel.++([tag_field_name])
+              |> Enum.uniq()
           }
 
         is_map(schema) && is_map(Map.get(schema, "properties")) ->
           schema
           |> Map.put("properties", Map.put(schema["properties"], tag_field_name, tag_property))
-          |> Map.put("required", Enum.uniq(Map.get(schema, "required", []) ++ [tag_field_name]))
+          |> Map.put("required",
+               Map.get(schema, "required", [])
+               |> Enum.map(&to_string/1)
+               |> Kernel.++([tag_field_name])
+               |> Enum.uniq()
+             )
 
         true ->
           schema
