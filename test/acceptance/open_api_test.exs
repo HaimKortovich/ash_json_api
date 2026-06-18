@@ -1077,7 +1077,7 @@ defmodule Test.Acceptance.OpenApiTest do
   end
 
   describe "Union type discriminator" do
-    test "tagged union includes discriminator in the schema", %{
+    test "tagged union uses $ref and includes discriminator with mapping", %{
       open_api_spec: %OpenApi{} = api_spec
     } do
       content_schema = api_spec.components.schemas["content"]
@@ -1085,23 +1085,47 @@ defmodule Test.Acceptance.OpenApiTest do
 
       assert %{"oneOf" => one_of, "discriminator" => discriminator} = shape_attr
       assert discriminator["propertyName"] == "type"
+
+      expected_mapping = %{
+        "circle" => "#/components/schemas/content_shape_circle",
+        "square" => "#/components/schemas/content_shape_square"
+      }
+
+      assert discriminator["mapping"] == expected_mapping
       assert length(one_of) == 3
     end
 
-    test "tagged union variants include the discriminator field as enum property", %{
+    test "tagged union oneOf entries are $ref references", %{
       open_api_spec: %OpenApi{} = api_spec
     } do
       content_schema = api_spec.components.schemas["content"]
       shape_attr = content_schema.properties.attributes.properties["shape"]
       %{"oneOf" => one_of} = shape_attr
 
-      circle_variant = Enum.find(one_of, &match?(%{required: req} when is_list(req), &1))
-      assert circle_variant
-      assert "type" in circle_variant.required
-      assert circle_variant.properties["type"] == %{"enum" => ["circle"], "type" => "string"}
+      refs = Enum.filter(one_of, &Map.has_key?(&1, "$ref"))
+      assert length(refs) == 2
+
+      assert %{"$ref" => "#/components/schemas/content_shape_circle"} in refs
+      assert %{"$ref" => "#/components/schemas/content_shape_square"} in refs
     end
 
-    test "untagged union variant is included without the discriminator field", %{
+    test "tagged union variant schemas are stored in components and include the tag", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      circle_schema = api_spec.components.schemas["content_shape_circle"]
+      assert circle_schema
+      assert "type" in circle_schema.required
+      assert circle_schema.properties["type"] == %{"enum" => ["circle"], "type" => "string"}
+      assert circle_schema.properties["radius"]
+
+      square_schema = api_spec.components.schemas["content_shape_square"]
+      assert square_schema
+      assert "type" in square_schema.required
+      assert square_schema.properties["type"] == %{"enum" => ["square"], "type" => "string"}
+      assert square_schema.properties["length"]
+    end
+
+    test "untagged union variant is included inline without the discriminator field", %{
       open_api_spec: %OpenApi{} = api_spec
     } do
       content_schema = api_spec.components.schemas["content"]

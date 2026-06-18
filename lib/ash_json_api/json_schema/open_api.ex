@@ -665,7 +665,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
       end)
 
       {subtypes, acc} =
-        Enum.reduce(constraints[:types], {[], acc}, fn {_name, config}, {types, acc} ->
+        Enum.reduce(constraints[:types], {[], acc}, fn {name, config}, {types, acc} ->
           fake_attr =
             %{
               attr
@@ -677,16 +677,23 @@ if Code.ensure_loaded?(OpenApiSpex) do
           {schema, acc} =
             resource_write_attribute_type(fake_attr, resource, action_type, acc, format)
 
-          schema =
-            case {tag_field, config[:tag_value]} do
-              {tag, value} when not is_nil(tag) and not is_nil(value) ->
-                add_tag_to_variant_schema(schema, to_string(tag), to_string(value))
+          case {tag_field, config[:tag_value]} do
+            {tag, value} when not is_nil(tag) and not is_nil(value) ->
+              schema = add_tag_to_variant_schema(schema, to_string(tag), to_string(value))
+              schema_name = union_variant_schema_name(attr, resource, name) <> "_input"
 
-              _ ->
-                schema
-            end
+              acc =
+                if acc.schemas[schema_name] do
+                  acc
+                else
+                  %{acc | schemas: Map.put(acc.schemas, schema_name, schema)}
+                end
 
-          {[schema | types], acc}
+              {[%{"$ref" => "#/components/schemas/#{schema_name}"} | types], acc}
+
+            _ ->
+              {[schema | types], acc}
+          end
         end)
 
       subtypes = Enum.reverse(subtypes)
@@ -699,9 +706,22 @@ if Code.ensure_loaded?(OpenApiSpex) do
             |> with_attribute_description(attr)
 
           _ ->
+            mapping =
+              constraints[:types]
+              |> Enum.filter(fn {_, c} -> c[:tag_value] end)
+              |> Enum.into(%{}, fn {name, c} ->
+                schema_name = union_variant_schema_name(attr, resource, name) <> "_input"
+
+                {to_string(c[:tag_value]),
+                 "#/components/schemas/#{schema_name}"}
+              end)
+
             %{
               "oneOf" => subtypes,
-              "discriminator" => %{"propertyName" => to_string(tag_field)}
+              "discriminator" => %{
+                "propertyName" => to_string(tag_field),
+                "mapping" => mapping
+              }
             }
             |> with_attribute_description(attr)
         end
@@ -935,7 +955,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         end)
 
       {subtypes, acc} =
-        Enum.reduce(constraints[:types], {[], acc}, fn {_name, config}, {types, acc} ->
+        Enum.reduce(constraints[:types], {[], acc}, fn {name, config}, {types, acc} ->
           fake_attr =
             %{
               attr
@@ -946,16 +966,23 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
           {schema, acc} = resource_attribute_type(fake_attr, resource, acc, format)
 
-          schema =
-            case {tag_field, config[:tag_value]} do
-              {tag, value} when not is_nil(tag) and not is_nil(value) ->
-                add_tag_to_variant_schema(schema, to_string(tag), to_string(value))
+          case {tag_field, config[:tag_value]} do
+            {tag, value} when not is_nil(tag) and not is_nil(value) ->
+              schema = add_tag_to_variant_schema(schema, to_string(tag), to_string(value))
+              schema_name = union_variant_schema_name(attr, resource, name)
 
-              _ ->
-                schema
-            end
+              acc =
+                if acc.schemas[schema_name] do
+                  acc
+                else
+                  %{acc | schemas: Map.put(acc.schemas, schema_name, schema)}
+                end
 
-          {[schema | types], acc}
+              {[%{"$ref" => "#/components/schemas/#{schema_name}"} | types], acc}
+
+            _ ->
+              {[schema | types], acc}
+          end
         end)
 
       subtypes = Enum.reverse(subtypes)
@@ -968,9 +995,20 @@ if Code.ensure_loaded?(OpenApiSpex) do
             |> with_attribute_description(attr)
 
           _ ->
+            mapping =
+              constraints[:types]
+              |> Enum.filter(fn {_, c} -> c[:tag_value] end)
+              |> Enum.into(%{}, fn {name, c} ->
+                {to_string(c[:tag_value]),
+                 "#/components/schemas/#{union_variant_schema_name(attr, resource, name)}"}
+              end)
+
             %{
               "oneOf" => subtypes,
-              "discriminator" => %{"propertyName" => to_string(tag_field)}
+              "discriminator" => %{
+                "propertyName" => to_string(tag_field),
+                "mapping" => mapping
+              }
             }
             |> with_attribute_description(attr)
         end
@@ -1324,6 +1362,17 @@ if Code.ensure_loaded?(OpenApiSpex) do
         {ref_schema, final_acc}
       else
         {schema, acc}
+      end
+    end
+
+    defp union_variant_schema_name(attr, resource, variant_name) do
+      json_api_type = AshJsonApi.Resource.Info.type(resource)
+      attr_name = Map.get(attr, :name)
+
+      if json_api_type && attr_name do
+        "#{json_api_type}_#{attr_name}_#{variant_name}"
+      else
+        to_string(variant_name)
       end
     end
 
