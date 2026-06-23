@@ -106,6 +106,7 @@ defmodule Test.Acceptance.OpenApiTest do
         route :post, "/path_with_enum/:enum", :takes_enum
         route(:get, "returns_map", :returns_map)
         route(:get, "/get_foo", :get_foo, description: "Fetch a Foo wrapper.")
+        route :post, "/no_args", :no_args
         post_to_relationship :posts
       end
     end
@@ -153,6 +154,12 @@ defmodule Test.Acceptance.OpenApiTest do
 
         run(fn _input, _ ->
           {:ok, %{b: "foo"}}
+        end)
+      end
+
+      action :no_args do
+        run(fn _input, _ ->
+          :ok
         end)
       end
     end
@@ -411,7 +418,7 @@ defmodule Test.Acceptance.OpenApiTest do
   end
 
   test "API routes are mapped to OpenAPI Operations", %{open_api_spec: %OpenApi{} = api_spec} do
-    assert map_size(api_spec.paths) == 15
+    assert map_size(api_spec.paths) == 16
 
     assert %{"/authors" => _, "/authors/{id}" => _, "/posts" => _, "/posts/{id}" => _, "/contents" => _, "/contents/{id}" => _} =
              api_spec.paths
@@ -528,7 +535,10 @@ defmodule Test.Acceptance.OpenApiTest do
              }
            ]
 
-    refute generic_action_schema.requestBody
+    assert %RequestBody{
+             required: false,
+             content: %{"application/vnd.api+json" => %OpenApiSpex.MediaType{}}
+           } = generic_action_schema.requestBody
 
     assert generic_action_schema.responses[201].content["application/vnd.api+json"].schema ==
              %Schema{
@@ -537,6 +547,22 @@ defmodule Test.Acceptance.OpenApiTest do
                required: [:success],
                additionalProperties: false
              }
+  end
+
+  test "generic routes with no arguments have response content", %{
+    open_api_spec: %OpenApi{} = api_spec
+  } do
+    assert generic_action_schema = api_spec.paths["/authors/no_args"].post
+
+    assert [] = generic_action_schema.parameters
+
+    assert %RequestBody{
+             required: false,
+             content: %{"application/vnd.api+json" => %OpenApiSpex.MediaType{}}
+           } = generic_action_schema.requestBody
+
+    assert %{201 => %{content: %{"application/vnd.api+json" => _}}} =
+             generic_action_schema.responses
   end
 
   test "generic route paths have enums", %{

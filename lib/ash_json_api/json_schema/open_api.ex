@@ -2280,9 +2280,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
       all_schemas = Map.merge(json_acc.schemas, multipart_acc.schemas)
 
       body =
-        if route.type == :route &&
-             (route.method in [:delete, :get] ||
-                Enum.empty?(json_body_schema.properties.data.properties)) do
+        if route.type == :route && route.method in [:delete, :get] do
           nil
         else
           body_required =
