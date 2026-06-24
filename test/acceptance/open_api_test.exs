@@ -619,7 +619,7 @@ defmodule Test.Acceptance.OpenApiTest do
       assert schema = api_spec.components.schemas["post-filter"]
 
       assert schema == %Schema{
-               type: :object,
+               type: :deepObject,
                description: "Filters the query to results matching the given filter object",
                properties: %{
                 author: %Reference{"$ref": "#/components/schemas/author-filter"},
