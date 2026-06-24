@@ -914,7 +914,8 @@ defmodule Test.Acceptance.OpenApiTest do
                       },
                       "name_twice" => %Schema{
                         type: :string,
-                        nullable: true
+                        nullable: true,
+                        description: "Field included by default."
                       },
                       "author_id" => %Schema{
                         type: :string,
@@ -1109,6 +1110,36 @@ defmodule Test.Acceptance.OpenApiTest do
       assert schema.properties.data.type == :object
       assert schema.properties.data.properties.attributes.required == ["name"]
       assert schema.properties.data.properties.attributes.type == :object
+    end
+
+    test "calculations are excluded from request body", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      %Operation{} = operation = api_spec.paths["/posts"].post
+      %RequestBody{} = body = operation.requestBody
+      schema = body.content["application/vnd.api+json"].schema
+      attrs = schema.properties.data.properties.attributes.properties
+
+      refute Map.has_key?(attrs, "name_twice"),
+             "calculations should not appear in the write/request body schema"
+    end
+
+    test "calculations are included in response component schema", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      assert %Schema{} = post_schema = api_spec.components.schemas["post"]
+      attrs = post_schema.properties.attributes.properties
+
+      assert Map.has_key?(attrs, "name_twice"),
+             "calculations should appear in the read/response component schema"
+      assert attrs["name_twice"] == %Schema{
+               type: :string,
+               nullable: true,
+               description: "Field included by default."
+             }
+
+      assert attrs["name_twice"].type == :string,
+             "calculation schema should have a concrete type, not nil"
     end
 
     test "Response body schema", %{open_api_spec: %OpenApi{} = api_spec} do

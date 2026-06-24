@@ -387,7 +387,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp attributes(resource, fields, acc) do
       fields =
         fields || AshJsonApi.Resource.Info.default_fields(resource) ||
-          Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name)
+          (Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name) ++
+             Enum.map(Ash.Resource.Info.public_calculations(resource), & &1.name))
 
       {properties, acc} = resource_attributes(resource, fields, :json, acc)
 
