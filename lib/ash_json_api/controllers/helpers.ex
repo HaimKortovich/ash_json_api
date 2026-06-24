@@ -942,7 +942,12 @@ defmodule AshJsonApi.Controllers.Helpers do
     fields =
       Map.get(request.fields, resource) || request.route.default_fields ||
         AshJsonApi.Resource.Info.default_fields(resource) ||
-        Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name)
+        if Application.get_env(:ash_json_api, :show_public_calculations_when_loaded?, true) do
+          Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name) ++
+            Enum.map(Ash.Resource.Info.public_calculations(resource), & &1.name)
+        else
+          Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name)
+        end
 
     field_inputs = request.field_inputs[resource] || %{}
 
