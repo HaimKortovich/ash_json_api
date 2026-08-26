@@ -236,6 +236,15 @@ defmodule AshJsonApi.JsonSchema do
     }
   end
 
+  @doc """
+  Public: the JSON:API `attributes` object schema for a resource — `properties`
+  (from `attribute_schema/1` for every public attribute, calculation and
+  aggregate) plus `required`, wrapped so non-required fields also accept `null`.
+  """
+  def resource_attributes_schema(resource) do
+    attributes(resource)
+  end
+
   defp attributes(resource) do
     %{
       "description" => "An attributes object for a #{AshJsonApi.Resource.Info.type(resource)}",
@@ -441,6 +450,23 @@ defmodule AshJsonApi.JsonSchema do
         resource_attribute_type(attr)
       end
     end
+  end
+
+  @doc """
+  Public: the JSON Schema for a single Ash field/attribute.
+
+  Accepts anything with `type` and `constraints` (an `%Ash.Resource.Attribute{}`,
+  or a plain map `%{type: ..., constraints: ...}`). Maps every Ash type —
+  String, Boolean, Integer, Float, Decimal, UtcDatetime, UUID, `:atom` with
+  `one_of`, `{:array, t}`, custom types implementing `json_schema/1`, embedded
+  resources, `Ash.Type.NewType`, `Ash.Type.Enum` and any fallback.
+  """
+  def attribute_schema(%{type: type, constraints: constraints} = attr) do
+    resource_attribute_type(%{attr | type: type, constraints: constraints})
+  end
+
+  def attribute_schema(%{type: type} = attr) do
+    resource_attribute_type(%{attr | type: type, constraints: []})
   end
 
   defp resource_attribute_type(%{type: Ash.Type.String}) do
