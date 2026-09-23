@@ -86,6 +86,7 @@ defmodule AshJsonApi.Router do
       plug(Plug.Parsers,
         parsers: [:json],
         pass: ["application/vnd.api+json"],
+        body_reader: {AshJsonApi.Plug.RawBodyReader, :read_body, []},
         json_decoder: Jason
       )
 

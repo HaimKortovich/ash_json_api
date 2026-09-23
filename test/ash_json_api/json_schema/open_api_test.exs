@@ -266,4 +266,48 @@ defmodule AshJsonApi.OpenApiTest do
              }
     end
   end
+
+  describe "webhooks/1 and spec_json/2" do
+    test "renders OpenAPI 3.1 webhooks at the document root" do
+      definition =
+        OpenApi.webhook(:lead_created,
+          operation_id: "leadCreatedWebhook",
+          summary: "Lead created",
+          payload_schema: %OpenApiSpex.Schema{
+            type: :object,
+            properties: %{id: %OpenApiSpex.Schema{type: :string}},
+            required: [:id]
+          },
+          security: [%{"webhookSignature" => []}]
+        )
+
+      assert %AshJsonApi.OpenApi.Webhook{} = definition
+
+      assert %OpenApiSpex.PathItem{post: %OpenApiSpex.Operation{}} =
+               AshJsonApi.OpenApi.Webhook.path_item(definition)
+
+      assert %OpenApiSpex.RequestBody{
+               content: %{"application/json" => %OpenApiSpex.MediaType{}}
+             } = definition.operation.requestBody
+
+      assert %OpenApiSpex.Response{} = definition.operation.responses["200"]
+
+      document = OpenApi.spec_json(webhooks: [definition])
+
+      assert document["openapi"] == "3.1.0"
+
+      assert document["webhooks"]["lead_created"]["post"]["operationId"] ==
+               "leadCreatedWebhook"
+
+      assert document["webhooks"]["lead_created"]["post"]["requestBody"]["content"][
+               "application/json"
+             ]["schema"]["required"] == ["id"]
+    end
+
+    test "rejects untyped payload schemas" do
+      assert_raise ArgumentError, ~r/payload_schema/, fn ->
+        OpenApi.webhook(:lead_created, payload_schema: %{"type" => "object"})
+      end
+    end
+  end
 end

@@ -1,0 +1,59 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Webhook test API",
+    "version": "1.0.0",
+    "license": {
+      "name": "Proprietary",
+      "identifier": "internal"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://example.test"
+    }
+  ],
+  "paths": {},
+  "components": {
+    "securitySchemes": {
+      "webhookSignature": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "webhookSignature": []
+    }
+  ],
+  "webhooks": {
+    "lead_created": {
+      "post": {
+        "operationId": "leadCreatedWebhook",
+        "summary": "Lead created",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook received"
+          }
+        }
+      }
+    }
+  }
+}

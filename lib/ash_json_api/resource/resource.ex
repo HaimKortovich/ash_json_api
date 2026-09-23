@@ -43,6 +43,21 @@ defmodule AshJsonApi.Resource do
       doc: "A list of action inputs to accept as query parameters.",
       default: []
     ],
+    webhook?: [
+      type: :boolean,
+      default: false,
+      doc: "Whether this route receives an unauthenticated, signature-verified webhook."
+    ],
+    headers: [
+      type: {:list, :string},
+      default: [],
+      doc: "Header names available to the webhook verifier and documented by the route."
+    ],
+    verify: [
+      type: {:fun, 3},
+      required: false,
+      doc: "A function of `(conn, payload, headers)` that returns :ok or {:error, reason}."
+    ],
     action_names_in_schema: [
       type: :keyword_list,
       doc:

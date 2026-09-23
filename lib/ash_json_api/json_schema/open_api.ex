@@ -35,6 +35,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
     """
     alias Ash.Query.Aggregate
     alias Ash.Resource.{Actions, Relationships}
+    alias AshJsonApi.OpenApi.Webhook
     alias AshJsonApi.Resource.Route
 
     alias OpenApiSpex.{
@@ -122,6 +123,55 @@ if Code.ensure_loaded?(OpenApiSpex) do
         ]
       }
       |> modify(conn, opts)
+    end
+
+    @doc """
+    Builds an OpenAPI JSON document with webhook definitions.
+
+    OpenApiSpex 3.x models the OpenAPI 3.0 root object and therefore cannot
+    represent the OpenAPI 3.1 `webhooks` property on its struct. This function
+    keeps `spec/2` backwards compatible and adds webhooks when the document is
+    rendered as JSON.
+
+    Webhooks are supplied as a list of typed `AshJsonApi.OpenApi.Webhook`
+    structs. Use
+    `webhook/2` to build the common POST webhook shape.
+    """
+    def spec_json(opts \\ [], conn \\ nil) do
+      webhook_definitions = opts[:webhooks] || []
+
+      spec(opts, conn)
+      |> OpenApi.to_map()
+      |> Map.put("openapi", if(webhook_definitions == [], do: "3.0.0", else: "3.1.0"))
+      |> Map.put("webhooks", webhook_json(webhook_definitions))
+    end
+
+    @doc """
+    Creates a standard POST webhook Path Item Object.
+
+    The returned typed struct can be passed directly in the `:webhooks` option to
+    `spec_json/2`. `:payload_schema` may be an OpenApiSpex schema, a schema
+    module or an OpenApiSpex schema struct.
+    """
+    @spec webhook(atom | String.t(), keyword) :: Webhook.t()
+    def webhook(name, opts) when is_atom(name) or is_binary(name) do
+      Webhook.new(name, opts)
+    end
+
+    @doc """
+    Normalizes webhook definitions into the OpenAPI `webhooks` object.
+    """
+    @spec webhooks([Webhook.t()]) :: %{String.t() => OpenApiSpex.PathItem.t()}
+    def webhooks(definitions) when is_list(definitions) do
+      definitions
+      |> Enum.map(fn %Webhook{name: name} = webhook -> {name, Webhook.path_item(webhook)} end)
+      |> Map.new()
+    end
+
+    defp webhook_json(definitions) do
+      definitions
+      |> webhooks()
+      |> Map.new(fn {name, path_item} -> {name, OpenApi.to_map(path_item)} end)
     end
 
     defp modify(spec, conn, opts) do
@@ -387,8 +437,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp attributes(resource, fields, acc) do
       fields =
         fields || AshJsonApi.Resource.Info.default_fields(resource) ||
-          (Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name) ++
-             Enum.map(Ash.Resource.Info.public_calculations(resource), & &1.name))
+          Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name) ++
+            Enum.map(Ash.Resource.Info.public_calculations(resource), & &1.name)
 
       {properties, acc} = resource_attributes(resource, fields, :json, acc)
 
@@ -666,12 +716,13 @@ if Code.ensure_loaded?(OpenApiSpex) do
           acc,
           format
         ) do
-      tag_field = Enum.find_value(constraints[:types] || [], fn
-        {_name, config} ->
-          if config[:tag_value] do
-            config[:tag]
-          end
-      end)
+      tag_field =
+        Enum.find_value(constraints[:types] || [], fn
+          {_name, config} ->
+            if config[:tag_value] do
+              config[:tag]
+            end
+        end)
 
       {subtypes, acc} =
         Enum.reduce(constraints[:types], {[], acc}, fn {name, config}, {types, acc} ->
@@ -721,8 +772,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
               |> Enum.into(%{}, fn {name, c} ->
                 schema_name = union_variant_schema_name(attr, resource, name) <> "_input"
 
-                {to_string(c[:tag_value]),
-                 "#/components/schemas/#{schema_name}"}
+                {to_string(c[:tag_value]), "#/components/schemas/#{schema_name}"}
               end)
 
             %{
@@ -1402,24 +1452,26 @@ if Code.ensure_loaded?(OpenApiSpex) do
           }
 
         match?(%Schema{}, schema) ->
-          %{schema |
-            properties: Map.put(schema.properties || %{}, tag_field_name, tag_property),
-            required:
-              (schema.required || [])
-              |> Enum.map(&to_string/1)
-              |> Kernel.++([tag_field_name])
-              |> Enum.uniq()
+          %{
+            schema
+            | properties: Map.put(schema.properties || %{}, tag_field_name, tag_property),
+              required:
+                (schema.required || [])
+                |> Enum.map(&to_string/1)
+                |> Kernel.++([tag_field_name])
+                |> Enum.uniq()
           }
 
         is_map(schema) && is_map(Map.get(schema, "properties")) ->
           schema
           |> Map.put("properties", Map.put(schema["properties"], tag_field_name, tag_property))
-          |> Map.put("required",
-               Map.get(schema, "required", [])
-               |> Enum.map(&to_string/1)
-               |> Kernel.++([tag_field_name])
-               |> Enum.uniq()
-             )
+          |> Map.put(
+            "required",
+            Map.get(schema, "required", [])
+            |> Enum.map(&to_string/1)
+            |> Kernel.++([tag_field_name])
+            |> Enum.uniq()
+          )
 
         true ->
           schema
@@ -1670,7 +1722,10 @@ if Code.ensure_loaded?(OpenApiSpex) do
         domain
         |> resources()
         |> Enum.flat_map_reduce(acc, fn resource, acc ->
-          routes = AshJsonApi.Resource.Info.routes(resource, all_domains)
+          routes =
+            resource
+            |> AshJsonApi.Resource.Info.routes(all_domains)
+            |> Enum.reject(& &1.webhook?)
 
           {route_operations, acc} =
             Enum.map_reduce(routes, acc, fn route, acc ->

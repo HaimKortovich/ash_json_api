@@ -184,6 +184,35 @@ defmodule AshJsonApi.Controllers.Helpers do
     end)
   end
 
+  def verify_webhook(request, conn) do
+    chain(request, fn request ->
+      if request.route.webhook? do
+        case request.route.verify do
+          verify when is_function(verify, 3) ->
+            headers = Map.new(request.req_headers)
+
+            payload = request.raw_body || request.body
+
+            case verify.(conn, payload, headers) do
+              :ok ->
+                request
+
+              {:ok, _verification} ->
+                request
+
+              {:error, _reason} ->
+                Request.add_error(request, Ash.Error.Forbidden.exception([]), :webhook)
+            end
+
+          _ ->
+            Request.add_error(request, Ash.Error.Forbidden.exception([]), :webhook)
+        end
+      else
+        request
+      end
+    end)
+  end
+
   def fetch_metadata(request) do
     chain(request, fn request ->
       if is_function(request.route.metadata, 3) do

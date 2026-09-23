@@ -21,6 +21,7 @@ defmodule AshJsonApi.Controllers.GenericActionRoute do
 
     conn
     |> Request.from(resource, action, domain, all_domains, route, options[:prefix])
+    |> Helpers.verify_webhook(conn)
     |> Helpers.run_action()
     |> Helpers.render_or_render_errors(conn, fn conn, request ->
       status =
