@@ -138,7 +138,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
     `webhook/2` to build the common POST webhook shape.
     """
     def spec_json(opts \\ [], conn \\ nil) do
-      webhook_definitions = opts[:webhooks] || []
+      webhook_definitions =
+        if Keyword.has_key?(opts, :webhooks) do
+          opts[:webhooks]
+        else
+          opts
+          |> then(&(&1[:domain] || &1[:domains]))
+          |> List.wrap()
+          |> Webhook.from_domains()
+        end
 
       spec(opts, conn)
       |> OpenApi.to_map()

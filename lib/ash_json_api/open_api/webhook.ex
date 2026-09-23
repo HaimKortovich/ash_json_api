@@ -57,6 +57,124 @@ if Code.ensure_loaded?(OpenApiSpex) do
       %PathItem{post: operation}
     end
 
+    @doc """
+    Discovers webhook definitions from AshJsonApi routes in the supplied domains.
+
+    A route marked `webhook?: true` is enough to appear in the OpenAPI 3.1
+    `webhooks` object. The request schema is derived from the public action
+    arguments, including embedded Ash typed structs.
+    """
+    @spec from_domains([module]) :: [t]
+    def from_domains(domains) when is_list(domains) do
+      for domain <- domains,
+          resource <- Ash.Domain.Info.resources(domain),
+          route <- AshJsonApi.Resource.Info.routes(resource, domains),
+          route.webhook? do
+        action = Ash.Resource.Info.action(resource, route.action)
+        payload = Enum.find(action.arguments, & &1.public?)
+        name = webhook_name(resource, payload)
+
+        new(name,
+          summary: humanize(name),
+          description: "Receives #{humanize(name)} events.",
+          operation_id: "#{name}Webhook",
+          payload_schema: payload_schema(payload),
+          responses: %{
+            "201" => %Response{description: "Webhook accepted."},
+            "400" => %Response{description: "Invalid webhook payload."},
+            "403" => %Response{description: "Webhook signature verification failed."}
+          }
+        )
+      end
+    end
+
+    defp webhook_name(_resource, %{type: type}) when is_atom(type) do
+      type
+      |> Module.split()
+      |> List.last()
+      |> Macro.underscore()
+      |> String.replace_suffix("_event", "")
+      |> Macro.camelize()
+      |> lower_first()
+    end
+
+    defp webhook_name(resource, _payload) do
+      resource
+      |> AshJsonApi.Resource.Info.type()
+      |> to_string()
+      |> String.replace_suffix("_webhook", "")
+      |> Macro.camelize()
+      |> lower_first()
+    end
+
+    defp lower_first(<<first::utf8, rest::binary>>),
+      do: <<String.downcase(<<first>>)::binary, rest::binary>>
+
+    defp lower_first(value), do: value
+
+    defp humanize(value) do
+      value
+      |> Macro.underscore()
+      |> String.replace("_", " ")
+      |> String.capitalize()
+    end
+
+    defp payload_schema(nil), do: %Schema{type: :object}
+
+    defp payload_schema(%{type: type, constraints: constraints}) do
+      type_schema(type, constraints)
+    end
+
+    defp type_schema(type, constraints) do
+      case Keyword.get(constraints, :fields) do
+        fields when is_list(fields) ->
+          {properties, required} =
+            Enum.reduce(fields, {%{}, []}, fn {name, field_opts}, {properties, required} ->
+              field_type = Keyword.fetch!(field_opts, :type)
+              field_constraints = Keyword.get(field_opts, :constraints, [])
+              schema = type_schema(field_type, field_constraints)
+              properties = Map.put(properties, to_string(name), schema)
+
+              required =
+                if Keyword.get(field_opts, :allow_nil?, true),
+                  do: required,
+                  else: [to_string(name) | required]
+
+              {properties, required}
+            end)
+
+          %Schema{type: :object, properties: properties, required: Enum.reverse(required)}
+
+        _ ->
+          primitive_schema(Ash.Type.get_type(type))
+      end
+    end
+
+    defp primitive_schema(type) do
+      cond do
+        type in [Ash.Type.String, Ash.Type.UUID] ->
+          %Schema{type: :string}
+
+        type in [Ash.Type.UtcDatetime, Ash.Type.DateTime] ->
+          %Schema{type: :string, format: :date_time}
+
+        type == Ash.Type.Date ->
+          %Schema{type: :string, format: :date}
+
+        type in [Ash.Type.Integer, Ash.Type.Decimal, Ash.Type.Float] ->
+          %Schema{type: :number}
+
+        type == Ash.Type.Boolean ->
+          %Schema{type: :boolean}
+
+        type == Ash.Type.Map ->
+          %Schema{type: :object, additionalProperties: true}
+
+        true ->
+          %Schema{}
+      end
+    end
+
     defp validate_schema!(schema) do
       if is_struct(schema, Schema) or is_struct(schema, Reference) or is_atom(schema) do
         schema
