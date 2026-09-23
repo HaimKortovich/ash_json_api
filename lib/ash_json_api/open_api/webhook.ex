@@ -78,7 +78,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
           summary: humanize(name),
           description: "Receives #{humanize(name)} events.",
           operation_id: "#{name}Webhook",
-          payload_schema: payload_schema(payload),
+          payload_schema: payload_schema(payload, resource),
           responses: %{
             "201" => %Response{description: "Webhook accepted."},
             "400" => %Response{description: "Invalid webhook payload."},
@@ -131,86 +131,25 @@ if Code.ensure_loaded?(OpenApiSpex) do
       |> String.capitalize()
     end
 
-    defp payload_schema(nil), do: %Schema{type: :object}
+    defp payload_schema(nil, _resource), do: %Schema{type: :object}
 
-    defp payload_schema(%{type: type, constraints: constraints}) do
-      type_schema(type, constraints)
-    end
+    defp payload_schema(payload, resource) do
+      {schema, _acc} =
+        AshJsonApi.OpenApi.resource_write_attribute_type(
+          payload,
+          resource,
+          :create,
+          AshJsonApi.OpenApi.empty_acc(),
+          :json
+        )
 
-    defp type_schema(type, constraints) do
-      case Keyword.get(constraints, :fields) do
-        fields when is_list(fields) ->
-          {properties, required} =
-            Enum.reduce(fields, {%{}, []}, fn {name, field_opts}, {properties, required} ->
-              field_type = Keyword.fetch!(field_opts, :type)
-              field_constraints = Keyword.get(field_opts, :constraints, [])
-              schema = type_schema(field_type, field_constraints)
-              properties = Map.put(properties, to_string(name), schema)
-
-              required =
-                if Keyword.get(field_opts, :allow_nil?, true),
-                  do: required,
-                  else: [to_string(name) | required]
-
-              {properties, required}
-            end)
-
-          %Schema{type: :object, properties: properties, required: Enum.reverse(required)}
-
-        _ ->
-          case Keyword.get(constraints, :instance_of) do
-            resource when is_atom(resource) ->
-              if Ash.Resource.Info.resource?(resource) &&
-                   Ash.Resource.Info.attributes(resource) != [] do
-                fields =
-                  Ash.Resource.Info.attributes(resource)
-                  |> Enum.map(fn attribute ->
-                    {attribute.name,
-                     [
-                       type: attribute.type,
-                       allow_nil?: attribute.allow_nil?,
-                       constraints: attribute.constraints
-                     ]}
-                  end)
-
-                type_schema(type, fields: fields)
-              else
-                primitive_schema(Ash.Type.get_type(type))
-              end
-
-            _ ->
-              primitive_schema(Ash.Type.get_type(type))
-          end
-      end
-    end
-
-    defp primitive_schema(type) do
-      cond do
-        type in [Ash.Type.String, Ash.Type.UUID] ->
-          %Schema{type: :string}
-
-        type in [Ash.Type.UtcDatetime, Ash.Type.DateTime] ->
-          %Schema{type: :string, format: :date_time}
-
-        type == Ash.Type.Date ->
-          %Schema{type: :string, format: :date}
-
-        type in [Ash.Type.Integer, Ash.Type.Decimal, Ash.Type.Float] ->
-          %Schema{type: :number}
-
-        type == Ash.Type.Boolean ->
-          %Schema{type: :boolean}
-
-        type == Ash.Type.Map ->
-          %Schema{type: :object, additionalProperties: true}
-
-        true ->
-          %Schema{}
-      end
+      schema
     end
 
     defp validate_schema!(schema) do
-      if is_struct(schema, Schema) or is_struct(schema, Reference) or is_atom(schema) do
+      if is_struct(schema, Schema) or is_struct(schema, Reference) or
+           (is_map(schema) && (Map.has_key?(schema, :type) || Map.has_key?(schema, "$ref"))) or
+           is_atom(schema) do
         schema
       else
         raise ArgumentError,
