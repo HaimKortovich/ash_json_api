@@ -71,7 +71,13 @@ if Code.ensure_loaded?(OpenApiSpex) do
           route <- AshJsonApi.Resource.Info.routes(resource, domains),
           route.webhook? do
         action = Ash.Resource.Info.action(resource, route.action)
-        payload = Enum.find(action.arguments, & &1.public?)
+        path_arguments = route_path_arguments(route)
+
+        payload =
+          Enum.find(action.arguments, fn argument ->
+            argument.public? and to_string(argument.name) not in path_arguments
+          end)
+
         name = webhook_name(resource, payload)
 
         new(name,
@@ -107,6 +113,11 @@ if Code.ensure_loaded?(OpenApiSpex) do
       |> String.replace_suffix("_webhook", "")
       |> Macro.camelize()
       |> lower_first()
+    end
+
+    defp route_path_arguments(%{route: route}) do
+      Regex.scan(~r/:([A-Za-z0-9_]+)/, route, capture: :all_but_first)
+      |> List.flatten()
     end
 
     defp webhook_name_from_type(type) do
