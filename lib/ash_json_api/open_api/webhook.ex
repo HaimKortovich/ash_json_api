@@ -88,14 +88,16 @@ if Code.ensure_loaded?(OpenApiSpex) do
       end
     end
 
+    defp webhook_name(_resource, %{type: type, constraints: constraints})
+         when type in [:struct, Ash.Type.Struct] do
+      case Keyword.get(constraints, :instance_of) do
+        type when is_atom(type) -> webhook_name_from_type(type)
+        _ -> "webhook"
+      end
+    end
+
     defp webhook_name(_resource, %{type: type}) when is_atom(type) do
-      type
-      |> Module.split()
-      |> List.last()
-      |> Macro.underscore()
-      |> String.replace_suffix("_event", "")
-      |> Macro.camelize()
-      |> lower_first()
+      webhook_name_from_type(type)
     end
 
     defp webhook_name(resource, _payload) do
@@ -103,6 +105,16 @@ if Code.ensure_loaded?(OpenApiSpex) do
       |> AshJsonApi.Resource.Info.type()
       |> to_string()
       |> String.replace_suffix("_webhook", "")
+      |> Macro.camelize()
+      |> lower_first()
+    end
+
+    defp webhook_name_from_type(type) do
+      type
+      |> Module.split()
+      |> List.last()
+      |> Macro.underscore()
+      |> String.replace_suffix("_event", "")
       |> Macro.camelize()
       |> lower_first()
     end
@@ -146,7 +158,29 @@ if Code.ensure_loaded?(OpenApiSpex) do
           %Schema{type: :object, properties: properties, required: Enum.reverse(required)}
 
         _ ->
-          primitive_schema(Ash.Type.get_type(type))
+          case Keyword.get(constraints, :instance_of) do
+            resource when is_atom(resource) ->
+              if Ash.Resource.Info.resource?(resource) &&
+                   Ash.Resource.Info.attributes(resource) != [] do
+                fields =
+                  Ash.Resource.Info.attributes(resource)
+                  |> Enum.map(fn attribute ->
+                    {attribute.name,
+                     [
+                       type: attribute.type,
+                       allow_nil?: attribute.allow_nil?,
+                       constraints: attribute.constraints
+                     ]}
+                  end)
+
+                type_schema(type, fields: fields)
+              else
+                primitive_schema(Ash.Type.get_type(type))
+              end
+
+            _ ->
+              primitive_schema(Ash.Type.get_type(type))
+          end
       end
     end
 

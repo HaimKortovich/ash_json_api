@@ -177,7 +177,6 @@ defmodule Test.Acceptance.WebhookTest do
     spec = AshJsonApi.OpenApi.spec_json(domain: [Domain])
 
     assert spec["openapi"] == "3.1.0"
-    IO.inspect(spec["webhooks"], label: "WEBHOOKS")
 
     assert %{"post" => %{"operationId" => "leadCreatedPayloadWebhook"}} =
              spec["webhooks"]["leadCreatedPayload"]
