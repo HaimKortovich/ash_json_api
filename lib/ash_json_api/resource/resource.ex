@@ -572,6 +572,17 @@ defmodule AshJsonApi.Resource do
         doc:
           "The fields to include in the object if the `fields` query parameter does not specify. Defaults to all public"
       ],
+      webhook_management?: [
+        type: :boolean,
+        default: false,
+        doc:
+          "Whether to expose the standard JSON:API management routes for this webhook resource."
+      ],
+      webhook_management: [
+        type: :keyword_list,
+        default: [],
+        doc: "Action overrides for the standard webhook management routes."
+      ],
       derive_sort?: [
         type: :boolean,
         doc:
@@ -723,6 +734,7 @@ defmodule AshJsonApi.Resource do
   }
 
   @transformers [
+    AshJsonApi.Resource.Transformers.AddWebhookManagementRoutes,
     AshJsonApi.Resource.Transformers.PrependRoutePrefix,
     AshJsonApi.Resource.Transformers.ValidateNoOverlappingRoutes,
     AshJsonApi.Resource.Transformers.RequirePrimaryKey

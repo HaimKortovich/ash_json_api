@@ -147,6 +147,9 @@ defmodule AshJsonApi.MixProject do
   defp deps do
     [
       {:ash, ash_version("~> 3.19 and >= 3.19.1")},
+      # Optional: importing applications may provide AshRbac for role-based
+      # policies without making ash_json_api require it.
+      {:ash_rbac, "~> 0.6", optional: true},
       {:spark, ">= 2.2.10"},
       {:igniter, "~> 0.3 and >= 0.3.58", optional: true},
       {:plug, "~> 1.11"},
