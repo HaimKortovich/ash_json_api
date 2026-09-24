@@ -82,7 +82,11 @@ defmodule AshJsonApi.Webhook.GenerateResource do
 
     rbac_ast = rbac_ast(roles, [:id, organization_attribute, event_attribute])
     rbac_imports = if Code.ensure_loaded?(AshRbac), do: rbac_imports_ast(), else: nil
-    route_matchers = route_matchers_ast()
+
+    management_route_prefix =
+      Transformer.get_option(dsl, [:webhooks], :management_route_prefix, "/")
+
+    route_matchers = route_matchers_ast(management_route_prefix)
 
     quote do
       use Ash.Resource,
@@ -102,7 +106,7 @@ defmodule AshJsonApi.Webhook.GenerateResource do
         type "webhook_secret"
 
         routes do
-          base "/"
+          base unquote(management_route_prefix)
           index :read
           get :read
           post :create, metadata: &__MODULE__.creation_metadata/3
@@ -141,7 +145,7 @@ defmodule AshJsonApi.Webhook.GenerateResource do
 
         update :rotate do
           primary? false
-          require_atomic? false
+          require_atomic?(false)
 
           change(
             {AshJsonApi.Webhook.GenerateSecretChange,
@@ -168,13 +172,16 @@ defmodule AshJsonApi.Webhook.GenerateResource do
     end
   end
 
-  defp route_matchers_ast do
+  defp route_matchers_ast(management_route_prefix) do
+    route = fn path -> Path.join(management_route_prefix, path) end
+
     [
-      {:get, "/", :read, :read, :index, AshJsonApi.Controllers.Index, nil},
-      {:get, "/:id", :read, :read, :get, AshJsonApi.Controllers.Get, nil},
-      {:post, "/", :create, :create, :post, AshJsonApi.Controllers.Post, :metadata},
-      {:patch, "/:id/rotate", :rotate, :update, :patch, AshJsonApi.Controllers.Patch, :metadata},
-      {:delete, "/:id", :destroy, :destroy, :delete, AshJsonApi.Controllers.Delete, nil}
+      {:get, route.("/"), :read, :read, :index, AshJsonApi.Controllers.Index, nil},
+      {:get, route.("/:id"), :read, :read, :get, AshJsonApi.Controllers.Get, nil},
+      {:post, route.("/"), :create, :create, :post, AshJsonApi.Controllers.Post, :metadata},
+      {:patch, route.("/:id/rotate"), :rotate, :update, :patch, AshJsonApi.Controllers.Patch,
+       :metadata},
+      {:delete, route.("/:id"), :destroy, :destroy, :delete, AshJsonApi.Controllers.Delete, nil}
     ]
     |> Enum.flat_map(&route_matcher_ast/1)
   end

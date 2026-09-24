@@ -5,6 +5,7 @@ defmodule AshJsonApi.Webhook.Dsl do
     name: :secret_store,
     describe: "Generated webhook secret storage configuration",
     schema: [
+      management_route_prefix: [type: :string, default: "/"],
       data_layer: [type: :atom, required: true],
       repo: [type: :atom, required: false],
       table: [type: :string, default: "webhook_secrets"],
