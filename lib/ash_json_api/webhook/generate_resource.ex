@@ -12,11 +12,15 @@ defmodule AshJsonApi.Webhook.GenerateResource do
       module = Module.concat(domain, WebhookSecret)
       config = secret_store_config(dsl)
 
+      management_route_prefix =
+        Transformer.get_option(dsl, [:webhooks], :management_route_prefix, "/")
+
       define_resource(
         module,
         domain,
         config,
-        Transformer.get_option(dsl, [:webhooks], :roles, [])
+        Transformer.get_option(dsl, [:webhooks], :roles, []),
+        management_route_prefix
       )
 
       {:ok,
@@ -48,7 +52,7 @@ defmodule AshJsonApi.Webhook.GenerateResource do
     end
   end
 
-  defp define_resource(module, domain, config, roles) do
+  defp define_resource(module, domain, config, roles, management_route_prefix) do
     if Code.ensure_loaded?(module) do
       :ok
     else
@@ -60,7 +64,7 @@ defmodule AshJsonApi.Webhook.GenerateResource do
       Code.ensure_loaded(config.data_layer)
       Code.ensure_loaded(AshRbac)
 
-      body = resource_ast(module, domain, config, roles)
+      body = resource_ast(module, domain, config, roles, management_route_prefix)
       source = "defmodule #{inspect(module)} do\n#{Macro.to_string(body)}\nend"
 
       Code.with_diagnostics(fn ->
@@ -69,7 +73,7 @@ defmodule AshJsonApi.Webhook.GenerateResource do
     end
   end
 
-  defp resource_ast(_module, domain, config, roles) do
+  defp resource_ast(_module, domain, config, roles, management_route_prefix) do
     data_layer = config.data_layer
     organization_attribute = config.organization_attribute
     event_attribute = config.event_attribute
@@ -82,9 +86,6 @@ defmodule AshJsonApi.Webhook.GenerateResource do
 
     rbac_ast = rbac_ast(roles, [:id, organization_attribute, event_attribute])
     rbac_imports = if Code.ensure_loaded?(AshRbac), do: rbac_imports_ast(), else: nil
-
-    management_route_prefix =
-      Transformer.get_option(dsl, [:webhooks], :management_route_prefix, "/")
 
     route_matchers = route_matchers_ast(management_route_prefix)
 
