@@ -25,6 +25,7 @@ defmodule AshJsonApi.Resource.Transformers.PrependRoutePrefix do
         end
 
       new_route = String.trim_trailing(new_route, "/")
+      new_route = if new_route == "", do: "/", else: new_route
 
       new_dsl =
         Transformer.replace_entity(

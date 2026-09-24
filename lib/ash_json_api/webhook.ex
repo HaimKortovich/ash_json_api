@@ -20,6 +20,35 @@ defmodule AshJsonApi.Webhook do
     "whsec_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
   end
 
+  @doc """
+  Fetches the generated secret for an event from a domain configured with
+  `webhooks do` and `secret_store do`.
+  """
+  def secret!(domain, organization_id, event)
+      when is_atom(domain) and is_binary(organization_id) and is_binary(event) do
+    resource = Module.concat(domain, WebhookSecret)
+    config = resource.__ash_json_api_webhook_config__()
+
+    filters = %{
+      config.organization_attribute => %{"eq" => organization_id},
+      config.event_attribute => %{"eq" => event}
+    }
+
+    case resource
+         |> Ash.Query.new()
+         |> Ash.Query.filter_input(filters)
+         |> Ash.read(authorize?: false, tenant: organization_id) do
+      {:ok, [%{secret_ciphertext: ciphertext}]} ->
+        AshJsonApi.Webhook.SecretStore.decrypt!(ciphertext, config.encryption_key)
+
+      {:ok, []} ->
+        raise "webhook secret for #{inspect(event)} and #{inspect(organization_id)} has not been generated"
+
+      {:error, error} ->
+        raise error
+    end
+  end
+
   @spec sign(String.t(), String.t(), integer | String.t(), iodata()) :: String.t()
   def sign(secret, webhook_id, timestamp, raw_body) do
     timestamp = to_string(timestamp)
