@@ -29,10 +29,10 @@ defmodule AshJsonApi.Webhook do
     resource = Module.concat(domain, WebhookSecret)
     config = resource.__ash_json_api_webhook_config__()
 
-    filters = %{
-      config.organization_attribute => %{"eq" => organization_id},
-      config.event_attribute => %{"eq" => event}
-    }
+    filters = [
+      {config.organization_attribute, [eq: organization_id]},
+      {config.event_attribute, [eq: event]}
+    ]
 
     case resource
          |> Ash.Query.new()
