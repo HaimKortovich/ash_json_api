@@ -85,6 +85,79 @@ defmodule AshJsonApi.OpenApiTest do
     end
   end
 
+  defmodule SharedWebhookPayload do
+    use Ash.Resource, data_layer: :embedded
+
+    attributes do
+      attribute(:event_id, :string, allow_nil?: false)
+    end
+  end
+
+  defmodule FirstProviderWebhook do
+    use Ash.Resource,
+      domain: DuplicateWebhooks,
+      data_layer: Ash.DataLayer.Ets,
+      extensions: [AshJsonApi.Resource]
+
+    json_api do
+      type("first_provider_webhook")
+
+      routes do
+        route(:post, "/webhooks/forms/:org_id/provider-one/application", :receive,
+          webhook?: true
+        )
+      end
+    end
+
+    actions do
+      action(:receive, :map) do
+        argument(:payload, :struct,
+          allow_nil?: false,
+          constraints: [instance_of: SharedWebhookPayload]
+        )
+
+        run(fn _input, _context -> {:ok, %{}} end)
+      end
+    end
+  end
+
+  defmodule SecondProviderWebhook do
+    use Ash.Resource,
+      domain: DuplicateWebhooks,
+      data_layer: Ash.DataLayer.Ets,
+      extensions: [AshJsonApi.Resource]
+
+    json_api do
+      type("second_provider_webhook")
+
+      routes do
+        route(:post, "/webhooks/forms/:org_id/provider-two/application", :receive,
+          webhook?: true
+        )
+      end
+    end
+
+    actions do
+      action(:receive, :map) do
+        argument(:payload, :struct,
+          allow_nil?: false,
+          constraints: [instance_of: SharedWebhookPayload]
+        )
+
+        run(fn _input, _context -> {:ok, %{}} end)
+      end
+    end
+  end
+
+  defmodule DuplicateWebhooks do
+    use Ash.Domain, extensions: [AshJsonApi.Domain]
+
+    resources do
+      resource(FirstProviderWebhook)
+      resource(SecondProviderWebhook)
+    end
+  end
+
   describe "filter_type/2" do
     test "with attribute" do
       resource = Post
@@ -268,6 +341,14 @@ defmodule AshJsonApi.OpenApiTest do
   end
 
   describe "webhooks/1 and spec_json/2" do
+    test "uses route identity when generated webhook payload names collide" do
+      spec = OpenApi.spec_json(domain: [DuplicateWebhooks])
+
+      assert Map.has_key?(spec["webhooks"], "providerOneApplication")
+      assert Map.has_key?(spec["webhooks"], "providerTwoApplication")
+      refute Map.has_key?(spec["webhooks"], "sharedWebhookPayload")
+    end
+
     test "renders OpenAPI 3.1 webhooks at the document root" do
       definition =
         OpenApi.webhook(:lead_created,

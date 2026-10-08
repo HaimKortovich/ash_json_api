@@ -66,19 +66,31 @@ if Code.ensure_loaded?(OpenApiSpex) do
     """
     @spec from_domains([module]) :: [t]
     def from_domains(domains) when is_list(domains) do
-      for domain <- domains,
-          resource <- Ash.Domain.Info.resources(domain),
-          route <- AshJsonApi.Resource.Info.routes(resource, domains),
-          route.webhook? do
-        action = Ash.Resource.Info.action(resource, route.action)
-        path_arguments = route_path_arguments(route)
+      routes =
+        for domain <- domains,
+            resource <- Ash.Domain.Info.resources(domain),
+            route <- AshJsonApi.Resource.Info.routes(resource, domains),
+            route.webhook? do
+          action = Ash.Resource.Info.action(resource, route.action)
+          path_arguments = route_path_arguments(route)
 
-        payload =
-          Enum.find(action.arguments, fn argument ->
-            argument.public? and to_string(argument.name) not in path_arguments
-          end)
+          payload =
+            Enum.find(action.arguments, fn argument ->
+              argument.public? and to_string(argument.name) not in path_arguments
+            end)
 
-        name = webhook_name(resource, payload)
+          {resource, route, payload, webhook_name(resource, payload)}
+        end
+
+      default_names = Enum.map(routes, &elem(&1, 3))
+
+      Enum.map(routes, fn {resource, route, payload, default_name} ->
+        name =
+          if Enum.count(default_names, &(&1 == default_name)) > 1 do
+            route_webhook_name(route) || default_name
+          else
+            default_name
+          end
 
         new(name,
           summary: humanize(name),
@@ -91,7 +103,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
             "403" => %Response{description: "Webhook signature verification failed."}
           }
         )
-      end
+      end)
     end
 
     defp webhook_name(_resource, %{type: type, constraints: constraints})
@@ -118,6 +130,32 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp route_path_arguments(%{route: route}) do
       Regex.scan(~r/:([A-Za-z0-9_]+)/, route, capture: :all_but_first)
       |> List.flatten()
+    end
+
+    defp route_webhook_name(%{route: route}) do
+      segments = String.split(route, "/", trim: true)
+
+      segments =
+        segments
+        |> Enum.reject(&String.starts_with?(&1, ":"))
+        |> Enum.drop_while(&(&1 != "webhooks"))
+        |> case do
+          ["webhooks", "forms" | rest] -> rest
+          ["webhooks" | rest] -> rest
+          _ -> []
+        end
+
+      case segments do
+        [] ->
+          nil
+
+        segments ->
+          segments
+          |> Enum.map(&String.replace(&1, "-", "_"))
+          |> Enum.join("_")
+          |> Macro.camelize()
+          |> lower_first()
+      end
     end
 
     defp webhook_name_from_type(type) do
