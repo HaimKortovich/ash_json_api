@@ -10,11 +10,12 @@ if Code.ensure_loaded?(OpenApiSpex) do
     alias OpenApiSpex.{MediaType, Operation, PathItem, Reference, RequestBody, Response, Schema}
 
     @enforce_keys [:name, :operation]
-    defstruct [:name, :operation]
+    defstruct [:name, :operation, schemas: %{}]
 
     @type t :: %__MODULE__{
             name: String.t(),
-            operation: Operation.t()
+            operation: Operation.t(),
+            schemas: map()
           }
 
     @spec new(atom | String.t(), keyword) :: t
@@ -49,7 +50,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         security: Keyword.get(opts, :security)
       }
 
-      %__MODULE__{name: name, operation: operation}
+      %__MODULE__{name: name, operation: operation, schemas: Keyword.get(opts, :schemas, %{})}
     end
 
     @spec path_item(t) :: PathItem.t()
@@ -92,11 +93,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
             default_name
           end
 
+        {payload_schema, schemas} = payload_schema(payload, resource)
+
         new(name,
           summary: humanize(name),
           description: "Receives #{humanize(name)} events.",
           operation_id: "#{name}Webhook",
-          payload_schema: payload_schema(payload, resource),
+          payload_schema: payload_schema,
+          schemas: schemas,
           responses: %{
             "201" => %Response{description: "Webhook accepted."},
             "400" => %Response{description: "Invalid webhook payload."},
@@ -180,10 +184,10 @@ if Code.ensure_loaded?(OpenApiSpex) do
       |> String.capitalize()
     end
 
-    defp payload_schema(nil, _resource), do: %Schema{type: :object}
+    defp payload_schema(nil, _resource), do: {%Schema{type: :object}, %{}}
 
     defp payload_schema(payload, resource) do
-      {schema, _acc} =
+      {schema, acc} =
         AshJsonApi.OpenApi.resource_write_attribute_type(
           payload,
           resource,
@@ -192,7 +196,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
           :json
         )
 
-      schema
+      {schema, acc.schemas}
     end
 
     defp validate_schema!(schema) do

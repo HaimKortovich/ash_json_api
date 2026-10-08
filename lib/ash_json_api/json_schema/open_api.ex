@@ -150,6 +150,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
       spec(opts, conn)
       |> OpenApi.to_map()
+      |> put_webhook_schemas(webhook_definitions)
       |> Map.put("openapi", if(webhook_definitions == [], do: "3.0.0", else: "3.1.0"))
       |> Map.put("webhooks", webhook_json(webhook_definitions))
     end
@@ -180,6 +181,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
       definitions
       |> webhooks()
       |> Map.new(fn {name, path_item} -> {name, OpenApi.to_map(path_item)} end)
+    end
+
+    defp put_webhook_schemas(document, definitions) do
+      schemas =
+        definitions
+        |> Enum.flat_map(&Map.to_list(&1.schemas))
+        |> Map.new(fn {name, schema} -> {name, OpenApi.to_map(schema)} end)
+
+      update_in(document, ["components", "schemas"], &Map.merge(&1 || %{}, schemas))
     end
 
     defp modify(spec, conn, opts) do

@@ -89,7 +89,18 @@ defmodule AshJsonApi.OpenApiTest do
     use Ash.Resource, data_layer: :embedded
 
     attributes do
-      attribute(:event_id, :string, allow_nil?: false)
+      attribute(:event_id, :string, allow_nil?: false, public?: true)
+
+      attribute(:value, :union,
+        allow_nil?: false,
+        public?: true,
+        constraints: [
+          types: [
+            text: [type: :string, tag: :kind, tag_value: "text"],
+            number: [type: :integer, tag: :kind, tag_value: "number"]
+          ]
+        ]
+      )
     end
   end
 
@@ -103,9 +114,7 @@ defmodule AshJsonApi.OpenApiTest do
       type("first_provider_webhook")
 
       routes do
-        route(:post, "/webhooks/forms/:org_id/provider-one/application", :receive,
-          webhook?: true
-        )
+        route(:post, "/webhooks/forms/:org_id/provider-one/application", :receive, webhook?: true)
       end
     end
 
@@ -131,9 +140,7 @@ defmodule AshJsonApi.OpenApiTest do
       type("second_provider_webhook")
 
       routes do
-        route(:post, "/webhooks/forms/:org_id/provider-two/application", :receive,
-          webhook?: true
-        )
+        route(:post, "/webhooks/forms/:org_id/provider-two/application", :receive, webhook?: true)
       end
     end
 
@@ -347,6 +354,28 @@ defmodule AshJsonApi.OpenApiTest do
       assert Map.has_key?(spec["webhooks"], "providerOneApplication")
       assert Map.has_key?(spec["webhooks"], "providerTwoApplication")
       refute Map.has_key?(spec["webhooks"], "sharedWebhookPayload")
+
+      payload_schema =
+        spec["webhooks"]["providerOneApplication"]["post"]["requestBody"]["content"][
+          "application/json"
+        ]["schema"]
+
+      payload_schema =
+        case payload_schema do
+          %{"$ref" => reference} ->
+            schema_name = reference |> String.split("/") |> List.last()
+            spec["components"]["schemas"][schema_name]
+
+          schema ->
+            schema
+        end
+
+      values_schema = payload_schema["properties"]["value"]
+
+      for %{"$ref" => reference} <- values_schema["oneOf"] do
+        schema_name = reference |> String.split("/") |> List.last()
+        assert Map.has_key?(spec["components"]["schemas"], schema_name)
+      end
     end
 
     test "renders OpenAPI 3.1 webhooks at the document root" do
