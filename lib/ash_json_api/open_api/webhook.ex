@@ -83,6 +83,17 @@ if Code.ensure_loaded?(OpenApiSpex) do
           {resource, route, payload, webhook_name(resource, payload)}
         end
 
+      route_webhooks = build_route_webhooks(routes)
+
+      ash_hooks_webhooks =
+        domains
+        |> Enum.flat_map(&Ash.Domain.Info.resources/1)
+        |> Enum.flat_map(&ash_hooks_declarations/1)
+
+      route_webhooks ++ ash_hooks_webhooks
+    end
+
+    defp build_route_webhooks(routes) do
       default_names = Enum.map(routes, &elem(&1, 3))
 
       Enum.map(routes, fn {resource, route, payload, default_name} ->
@@ -108,6 +119,58 @@ if Code.ensure_loaded?(OpenApiSpex) do
           }
         )
       end)
+    end
+
+    defp ash_hooks_declarations(resource) do
+      if Code.ensure_loaded?(AshHooks.Info) and
+           function_exported?(AshHooks.Info, :webhooks, 1) do
+        resource
+        |> then(&apply(AshHooks.Info, :webhooks, [&1]))
+        |> Enum.filter(&ash_hooks_inbound?/1)
+        |> Enum.map(&ash_hooks_webhook(resource, &1))
+      else
+        []
+      end
+    end
+
+    defp ash_hooks_inbound?(%{__struct__: module}) do
+      module |> Module.split() |> List.last() == "Inbound"
+    end
+
+    defp ash_hooks_inbound?(_), do: false
+
+    defp ash_hooks_webhook(resource, declaration) do
+      name = "#{resource_name(resource)}.#{declaration.name}"
+
+      new(name,
+        summary: humanize(name),
+        description: "Receives #{humanize(name)} events.",
+        operation_id:
+          "receive#{Macro.camelize(resource_name(resource))}#{Macro.camelize(to_string(declaration.name))}Webhook",
+        payload_schema: ash_hooks_payload_schema(declaration),
+        responses: %{
+          "200" => %Response{description: "Webhook accepted."},
+          "400" => %Response{description: "Invalid webhook payload."},
+          "403" => %Response{description: "Webhook signature verification failed."}
+        }
+      )
+    end
+
+    defp ash_hooks_payload_schema(%{provider: provider}) when is_atom(provider) do
+      if function_exported?(provider, :open_api_schema, 0) do
+        provider.open_api_schema()
+      else
+        %Schema{type: :object}
+      end
+    end
+
+    defp ash_hooks_payload_schema(_), do: %Schema{type: :object}
+
+    defp resource_name(resource) do
+      resource
+      |> Module.split()
+      |> List.last()
+      |> Macro.underscore()
     end
 
     defp webhook_name(_resource, %{type: type, constraints: constraints})
