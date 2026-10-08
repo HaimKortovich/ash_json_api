@@ -111,29 +111,25 @@ defmodule AshJsonApi.Request do
       json_api_prefix: prefix || AshJsonApi.Domain.Info.prefix(domain)
     }
 
-    if route.webhook? do
-      parse_webhook_arguments(request)
-    else
-      request
-      |> validate_params()
-      |> validate_href_schema()
-      |> validate_req_headers()
-      |> validate_body()
-      |> validate_require_type_on_create()
-      |> parse_fields()
-      |> parse_field_inputs()
-      |> parse_filter_included()
-      |> parse_sort_included()
-      |> parse_included_page()
-      |> parse_includes()
-      |> parse_filter()
-      |> parse_sort()
-      |> parse_attributes()
-      |> parse_query_params()
-      |> parse_action_arguments()
-      |> parse_relationships()
-      |> parse_resource_identifiers()
-    end
+    request
+    |> validate_params()
+    |> validate_href_schema()
+    |> validate_req_headers()
+    |> validate_body()
+    |> validate_require_type_on_create()
+    |> parse_fields()
+    |> parse_field_inputs()
+    |> parse_filter_included()
+    |> parse_sort_included()
+    |> parse_included_page()
+    |> parse_includes()
+    |> parse_filter()
+    |> parse_sort()
+    |> parse_attributes()
+    |> parse_query_params()
+    |> parse_action_arguments()
+    |> parse_relationships()
+    |> parse_resource_identifiers()
   end
 
   def load_opts(request) do
@@ -1276,56 +1272,6 @@ defmodule AshJsonApi.Request do
   end
 
   defp parse_action_arguments(request), do: request
-
-  # Webhooks are deliberately not forced into JSON:API's `data.attributes`
-  # envelope. A provider owns the request body shape. The action still owns
-  # the type: its single public struct argument is passed to Ash unchanged and
-  # Ash.ActionInput performs the normal typed cast/validation before execution.
-  defp parse_webhook_arguments(%{action: %{type: :action} = action} = request) do
-    struct_arguments =
-      Enum.filter(action.arguments, fn argument ->
-        argument.public? && webhook_struct_type?(argument.type, argument.constraints)
-      end)
-
-    case struct_arguments do
-      [%{name: name}] ->
-        %{request | arguments: %{name => request.body}}
-
-      [] ->
-        add_webhook_error(
-          request,
-          "webhook actions require one public struct argument with an :instance_of constraint",
-          :webhook
-        )
-
-      _ ->
-        add_webhook_error(
-          request,
-          "webhook actions must have exactly one public struct argument with an :instance_of constraint",
-          :webhook
-        )
-    end
-  end
-
-  defp parse_webhook_arguments(request) do
-    add_webhook_error(request, "webhook routes must point to an action", :webhook)
-  end
-
-  defp webhook_struct_type?(Ash.Type.Struct, constraints) do
-    Keyword.has_key?(constraints, :instance_of)
-  end
-
-  defp webhook_struct_type?(type, _constraints) do
-    Ash.Type.NewType.new_type?(type) && Ash.Type.NewType.subtype_of(type) == Ash.Type.Struct
-  end
-
-  defp add_webhook_error(request, message, source) do
-    add_error(
-      request,
-      Ash.Error.Invalid.exception(message: message),
-      source
-    )
-  end
 
   defp parse_relationships(
          %{

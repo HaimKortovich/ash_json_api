@@ -133,20 +133,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
     keeps `spec/2` backwards compatible and adds webhooks when the document is
     rendered as JSON.
 
-    Webhooks are supplied as a list of typed `AshJsonApi.OpenApi.Webhook`
-    structs. Use
-    `webhook/2` to build the common POST webhook shape.
+    Inbound webhook definitions are discovered from AshHooks declarations on
+    the supplied domains when the optional AshHooks dependency is loaded.
     """
     def spec_json(opts \\ [], conn \\ nil) do
       webhook_definitions =
-        if Keyword.has_key?(opts, :webhooks) do
-          opts[:webhooks]
-        else
-          opts
-          |> then(&(&1[:domain] || &1[:domains]))
-          |> List.wrap()
-          |> Webhook.from_domains()
-        end
+        opts
+        |> then(&(&1[:domain] || &1[:domains]))
+        |> List.wrap()
+        |> Webhook.from_domains()
 
       spec(opts, conn)
       |> OpenApi.to_map()
@@ -155,23 +150,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
       |> Map.put("webhooks", webhook_json(webhook_definitions))
     end
 
-    @doc """
-    Creates a standard POST webhook Path Item Object.
-
-    The returned typed struct can be passed directly in the `:webhooks` option to
-    `spec_json/2`. `:payload_schema` may be an OpenApiSpex schema, a schema
-    module or an OpenApiSpex schema struct.
-    """
-    @spec webhook(atom | String.t(), keyword) :: Webhook.t()
-    def webhook(name, opts) when is_atom(name) or is_binary(name) do
-      Webhook.new(name, opts)
-    end
-
-    @doc """
-    Normalizes webhook definitions into the OpenAPI `webhooks` object.
-    """
-    @spec webhooks([Webhook.t()]) :: %{String.t() => OpenApiSpex.PathItem.t()}
-    def webhooks(definitions) when is_list(definitions) do
+    defp webhooks(definitions) when is_list(definitions) do
       definitions
       |> Enum.map(fn %Webhook{name: name} = webhook -> {name, Webhook.path_item(webhook)} end)
       |> Map.new()
@@ -1740,10 +1719,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         domain
         |> resources()
         |> Enum.flat_map_reduce(acc, fn resource, acc ->
-          routes =
-            resource
-            |> AshJsonApi.Resource.Info.routes(all_domains)
-            |> Enum.reject(& &1.webhook?)
+          routes = AshJsonApi.Resource.Info.routes(resource, all_domains)
 
           {route_operations, acc} =
             Enum.map_reduce(routes, acc, fn route, acc ->

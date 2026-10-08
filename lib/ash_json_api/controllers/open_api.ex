@@ -43,11 +43,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
         opts = Keyword.put(opts, :phoenix_endpoint, phoenix_endpoint)
 
-        if Keyword.has_key?(opts, :webhooks) do
-          AshJsonApi.OpenApi.spec_json(opts, conn)
-        else
-          AshJsonApi.OpenApi.spec(opts, conn)
-        end
+        AshJsonApi.OpenApi.spec(opts, conn)
       end
     end
   end

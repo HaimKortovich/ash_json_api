@@ -83,8 +83,7 @@ To customize the main values of the OpenAPI spec, a few options are available:
     open_api: "/open_api",
     open_api_title: "Title",
     open_api_version: "1.0.0",
-    open_api_servers: ["http://domain.com/api/v1"],
-    webhooks: [...]
+    open_api_servers: ["http://domain.com/api/v1"]
 ```
 
 If `:open_api_servers` is not specified, a default server is automatically derived from your app's Phoenix endpoint, as retrieved from inbound connections on the `open_api` HTTP route.
@@ -114,77 +113,28 @@ To override any value in the OpenApi documentation you can use the `:modify_open
   end
 ```
 
-## Webhooks
+## Inbound webhooks
 
-OpenAPI webhooks are described at the root of an OpenAPI 3.1 document. Since
-OpenApiSpex 3.x exposes an OpenAPI 3.0 struct, use `AshJsonApi.OpenApi.spec_json/2`
-when the generated document includes webhooks. Existing `spec/2` callers remain
-unchanged.
+Inbound webhook runtime behavior belongs to AshHooks. AshJsonApi does not
+provide webhook routes, signature verification, secret storage, or management
+resources.
 
-Define each webhook as a Path Item Object with `AshJsonApi.OpenApi.webhook/2`:
-
-```elixir
-def open_api_json(conn) do
-  AshJsonApi.OpenApi.spec_json(
-    [
-      domains: [MyApp.Api],
-      open_api_title: "My App API",
-      open_api_version: "1.0.0",
-      webhooks: [
-        AshJsonApi.OpenApi.webhook(:lead_created,
-          operation_id: "leadCreatedWebhook",
-          summary: "Lead created",
-          description: "Sent when a lead is created.",
-          payload_schema: %OpenApiSpex.Schema{
-            type: :object,
-            properties: %{id: %OpenApiSpex.Schema{type: :string}},
-            required: [:id]
-          },
-          security: [%{"webhookSignature" => []}]
-        )
-      ]
-    ],
-    conn
-  )
-end
-```
-
-The returned value is a JSON-ready map containing `openapi: "3.1.0"` and a
-root-level `webhooks` object. Webhook names are registration-independent; the
-consumer chooses the delivery URL when subscribing.
-
-Webhook definitions are typed `AshJsonApi.OpenApi.Webhook` structs backed by
-`OpenApiSpex.Operation`, `OpenApiSpex.RequestBody`, `OpenApiSpex.MediaType`,
-and `OpenApiSpex.Response` structs. Raw webhook operation maps are not part of
-the supported construction API.
-
-## Verifying webhook deliveries
-
-`AshJsonApi.Webhook` provides Standard Webhooks-compatible signing helpers. The
-sender signs the exact request body using the delivery ID and Unix timestamp:
+When AshHooks is loaded, `AshJsonApi.OpenApi.spec_json/2` discovers each
+resource's `inbound` declaration and emits it at the root `webhooks` property
+of an OpenAPI 3.1 document. The webhook payload remains owned and validated by
+the AshHooks provider.
 
 ```elixir
-signature = AshJsonApi.Webhook.sign(secret, webhook_id, timestamp, raw_body)
+AshJsonApi.OpenApi.spec_json(
+  domains: [MyApp.Api],
+  open_api_title: "My App API",
+  open_api_version: "1.0.0"
+)
 ```
 
-The signature is sent as `v1,<signature>` in the `webhook-signature` header.
-The receiver should verify the timestamp and signature before running the Ash
-action:
-
-```elixir
-verify: fn _conn, raw_body, headers ->
-  AshJsonApi.Webhook.verify(
-    secret,
-    headers["webhook-id"],
-    headers["webhook-timestamp"],
-    raw_body,
-    headers["webhook-signature"]
-  )
-end
-```
-
-In production, the verifier should receive the original raw request body rather
-than a re-encoded JSON map.
+Applications should mount their HTTP adapter, raw-body reader, signing, and
+delivery handling from AshHooks. AshJsonApi only contributes the normal
+JSON:API document and the generated OpenAPI description.
 
 ## Generate spec files via CLI
 
