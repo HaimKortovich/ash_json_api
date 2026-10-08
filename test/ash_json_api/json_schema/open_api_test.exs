@@ -85,6 +85,86 @@ defmodule AshJsonApi.OpenApiTest do
     end
   end
 
+  defmodule SharedWebhookPayload do
+    use Ash.Resource, data_layer: :embedded
+
+    attributes do
+      attribute(:event_id, :string, allow_nil?: false, public?: true)
+
+      attribute(:value, :union,
+        allow_nil?: false,
+        public?: true,
+        constraints: [
+          types: [
+            text: [type: :string, tag: :kind, tag_value: "text"],
+            number: [type: :integer, tag: :kind, tag_value: "number"]
+          ]
+        ]
+      )
+    end
+  end
+
+  defmodule FirstProviderWebhook do
+    use Ash.Resource,
+      domain: DuplicateWebhooks,
+      data_layer: Ash.DataLayer.Ets,
+      extensions: [AshJsonApi.Resource]
+
+    json_api do
+      type("first_provider_webhook")
+
+      routes do
+        route(:post, "/webhooks/forms/:org_id/provider-one/application", :receive, webhook?: true)
+      end
+    end
+
+    actions do
+      action(:receive, :map) do
+        argument(:payload, :struct,
+          allow_nil?: false,
+          constraints: [instance_of: SharedWebhookPayload]
+        )
+
+        run(fn _input, _context -> {:ok, %{}} end)
+      end
+    end
+  end
+
+  defmodule SecondProviderWebhook do
+    use Ash.Resource,
+      domain: DuplicateWebhooks,
+      data_layer: Ash.DataLayer.Ets,
+      extensions: [AshJsonApi.Resource]
+
+    json_api do
+      type("second_provider_webhook")
+
+      routes do
+        route(:post, "/webhooks/forms/:org_id/provider-two/application", :receive, webhook?: true)
+      end
+    end
+
+    actions do
+      action(:receive, :map) do
+        argument(:payload, :struct,
+          allow_nil?: false,
+          constraints: [instance_of: SharedWebhookPayload]
+        )
+
+        run(fn _input, _context -> {:ok, %{}} end)
+      end
+    end
+  end
+
+  defmodule DuplicateWebhooks do
+    use Ash.Domain, extensions: [AshJsonApi.Domain]
+
+    resources do
+      resource(FirstProviderWebhook)
+      resource(SecondProviderWebhook)
+    end
+  end
+
   describe "filter_type/2" do
     test "with attribute" do
       resource = Post
@@ -264,6 +344,80 @@ defmodule AshJsonApi.OpenApiTest do
                required: [],
                additionalProperties: false
              }
+    end
+  end
+
+  describe "webhooks/1 and spec_json/2" do
+    test "uses route identity when generated webhook payload names collide" do
+      spec = OpenApi.spec_json(domain: [DuplicateWebhooks])
+
+      assert Map.has_key?(spec["webhooks"], "providerOneApplication")
+      assert Map.has_key?(spec["webhooks"], "providerTwoApplication")
+      refute Map.has_key?(spec["webhooks"], "sharedWebhookPayload")
+
+      payload_schema =
+        spec["webhooks"]["providerOneApplication"]["post"]["requestBody"]["content"][
+          "application/json"
+        ]["schema"]
+
+      payload_schema =
+        case payload_schema do
+          %{"$ref" => reference} ->
+            schema_name = reference |> String.split("/") |> List.last()
+            spec["components"]["schemas"][schema_name]
+
+          schema ->
+            schema
+        end
+
+      values_schema = payload_schema["properties"]["value"]
+
+      for %{"$ref" => reference} <- values_schema["oneOf"] do
+        schema_name = reference |> String.split("/") |> List.last()
+        assert Map.has_key?(spec["components"]["schemas"], schema_name)
+      end
+    end
+
+    test "renders OpenAPI 3.1 webhooks at the document root" do
+      definition =
+        OpenApi.webhook(:lead_created,
+          operation_id: "leadCreatedWebhook",
+          summary: "Lead created",
+          payload_schema: %OpenApiSpex.Schema{
+            type: :object,
+            properties: %{id: %OpenApiSpex.Schema{type: :string}},
+            required: [:id]
+          },
+          security: [%{"webhookSignature" => []}]
+        )
+
+      assert %AshJsonApi.OpenApi.Webhook{} = definition
+
+      assert %OpenApiSpex.PathItem{post: %OpenApiSpex.Operation{}} =
+               AshJsonApi.OpenApi.Webhook.path_item(definition)
+
+      assert %OpenApiSpex.RequestBody{
+               content: %{"application/json" => %OpenApiSpex.MediaType{}}
+             } = definition.operation.requestBody
+
+      assert %OpenApiSpex.Response{} = definition.operation.responses["200"]
+
+      document = OpenApi.spec_json(webhooks: [definition])
+
+      assert document["openapi"] == "3.1.0"
+
+      assert document["webhooks"]["lead_created"]["post"]["operationId"] ==
+               "leadCreatedWebhook"
+
+      assert document["webhooks"]["lead_created"]["post"]["requestBody"]["content"][
+               "application/json"
+             ]["schema"]["required"] == ["id"]
+    end
+
+    test "rejects untyped payload schemas" do
+      assert_raise ArgumentError, ~r/payload_schema/, fn ->
+        OpenApi.webhook(:lead_created, payload_schema: %{"type" => "object"})
+      end
     end
   end
 end

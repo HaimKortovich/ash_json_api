@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 defmodule AshJsonApi.Domain do
+  @webhooks AshJsonApi.Webhook.Dsl.section()
   @open_api %Spark.Dsl.Section{
     name: :open_api,
     describe: "OpenAPI configurations",
@@ -208,9 +209,12 @@ defmodule AshJsonApi.Domain do
   ]
 
   @persisters [AshJsonApi.Domain.Persisters.DefineRouter]
-  @transformers [AshJsonApi.Domain.Transformers.SetBaseRoutes]
+  @transformers [
+    AshJsonApi.Webhook.GenerateResource,
+    AshJsonApi.Domain.Transformers.SetBaseRoutes
+  ]
 
-  @sections [@json_api]
+  @sections [@json_api, @webhooks]
 
   @moduledoc """
   The entrypoint for adding JSON:API behavior to an Ash domain

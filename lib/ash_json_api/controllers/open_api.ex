@@ -22,8 +22,10 @@ if Code.ensure_loaded?(OpenApiSpex) do
           paths -> Path.join(paths)
         end
 
-      spec = conn |> spec(Keyword.put(opts, :prefix, prefix))
-      spec = Jason.encode!(spec, pretty: true)
+      spec =
+        conn
+        |> spec(Keyword.put(opts, :prefix, prefix))
+        |> Jason.encode!(pretty: true)
 
       conn
       |> Plug.Conn.send_resp(200, spec)
@@ -41,7 +43,11 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
         opts = Keyword.put(opts, :phoenix_endpoint, phoenix_endpoint)
 
-        AshJsonApi.OpenApi.spec_json(opts, conn)
+        if Keyword.has_key?(opts, :webhooks) do
+          AshJsonApi.OpenApi.spec_json(opts, conn)
+        else
+          AshJsonApi.OpenApi.spec(opts, conn)
+        end
       end
     end
   end

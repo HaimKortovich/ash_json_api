@@ -35,6 +35,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
     """
     alias Ash.Query.Aggregate
     alias Ash.Resource.{Actions, Relationships}
+    alias AshJsonApi.OpenApi.Webhook
     alias AshJsonApi.Resource.Route
 
     alias OpenApiSpex.{
@@ -125,44 +126,70 @@ if Code.ensure_loaded?(OpenApiSpex) do
     end
 
     @doc """
-    Generates the webhook declarations exposed by AshHooks resources.
+    Builds an OpenAPI JSON document with webhook definitions.
 
-    AshHooks is an optional integration. When it is not loaded, this function
-    returns an empty map and does not require the dependency at compile time.
-    Only `inbound` declarations are emitted as OpenAPI 3.1 `webhooks` entries;
-    outbound AshHooks declarations are intentionally ignored. AshHooks does not
-    know the concrete Phoenix route used by an inbound controller.
+    OpenApiSpex 3.x models the OpenAPI 3.0 root object and therefore cannot
+    represent the OpenAPI 3.1 `webhooks` property on its struct. This function
+    keeps `spec/2` backwards compatible and adds webhooks when the document is
+    rendered as JSON.
 
-    AshHooks declarations do not contain payload schemas. The generated
-    request body therefore intentionally uses an open JSON schema; the
-    provider's `AshHooks.Provider` implementation remains the source of truth
-    for payload validation.
+    Webhooks are supplied as a list of typed `AshJsonApi.OpenApi.Webhook`
+    structs. Use
+    `webhook/2` to build the common POST webhook shape.
     """
-    @spec webhooks([module()] | module()) :: %{String.t() => map()}
-    def webhooks(domains) do
-      AshJsonApi.OpenApi.AshHooks.webhooks(List.wrap(domains))
+    def spec_json(opts \\ [], conn \\ nil) do
+      webhook_definitions =
+        if Keyword.has_key?(opts, :webhooks) do
+          opts[:webhooks]
+        else
+          opts
+          |> then(&(&1[:domain] || &1[:domains]))
+          |> List.wrap()
+          |> Webhook.from_domains()
+        end
+
+      spec(opts, conn)
+      |> OpenApi.to_map()
+      |> put_webhook_schemas(webhook_definitions)
+      |> Map.put("openapi", if(webhook_definitions == [], do: "3.0.0", else: "3.1.0"))
+      |> Map.put("webhooks", webhook_json(webhook_definitions))
     end
 
     @doc """
-    Builds the JSON OpenAPI document, including optional AshHooks inbound
-    webhook declarations.
+    Creates a standard POST webhook Path Item Object.
 
-    `spec/2` remains the typed OpenApiSpex 3.0 document API. OpenApiSpex does
-    not model the OpenAPI 3.1 root `webhooks` member, so this JSON boundary is
-    the single place where AshJsonApi emits it. AshHooks remains optional.
+    The returned typed struct can be passed directly in the `:webhooks` option to
+    `spec_json/2`. `:payload_schema` may be an OpenApiSpex schema, a schema
+    module or an OpenApiSpex schema struct.
     """
-    @spec spec_json(keyword(), Plug.Conn.t() | nil) :: map()
-    def spec_json(opts \\ [], conn \\ nil) do
-      spec = spec(opts, conn) |> OpenApi.to_map()
-      webhook_definitions = webhooks(List.wrap(opts[:domain] || opts[:domains]))
+    @spec webhook(atom | String.t(), keyword) :: Webhook.t()
+    def webhook(name, opts) when is_atom(name) or is_binary(name) do
+      Webhook.new(name, opts)
+    end
 
-      if map_size(webhook_definitions) == 0 do
-        spec
-      else
-        spec
-        |> Map.put("openapi", "3.1.0")
-        |> Map.put("webhooks", webhook_definitions)
-      end
+    @doc """
+    Normalizes webhook definitions into the OpenAPI `webhooks` object.
+    """
+    @spec webhooks([Webhook.t()]) :: %{String.t() => OpenApiSpex.PathItem.t()}
+    def webhooks(definitions) when is_list(definitions) do
+      definitions
+      |> Enum.map(fn %Webhook{name: name} = webhook -> {name, Webhook.path_item(webhook)} end)
+      |> Map.new()
+    end
+
+    defp webhook_json(definitions) do
+      definitions
+      |> webhooks()
+      |> Map.new(fn {name, path_item} -> {name, OpenApi.to_map(path_item)} end)
+    end
+
+    defp put_webhook_schemas(document, definitions) do
+      schemas =
+        definitions
+        |> Enum.flat_map(&Map.to_list(&1.schemas))
+        |> Map.new(fn {name, schema} -> {name, OpenApi.to_map(schema)} end)
+
+      update_in(document, ["components", "schemas"], &Map.merge(&1 || %{}, schemas))
     end
 
     defp modify(spec, conn, opts) do
@@ -428,8 +455,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp attributes(resource, fields, acc) do
       fields =
         fields || AshJsonApi.Resource.Info.default_fields(resource) ||
-          (Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name) ++
-             Enum.map(Ash.Resource.Info.public_calculations(resource), & &1.name))
+          Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name) ++
+            Enum.map(Ash.Resource.Info.public_calculations(resource), & &1.name)
 
       {properties, acc} = resource_attributes(resource, fields, :json, acc)
 
@@ -707,12 +734,13 @@ if Code.ensure_loaded?(OpenApiSpex) do
           acc,
           format
         ) do
-      tag_field = Enum.find_value(constraints[:types] || [], fn
-        {_name, config} ->
-          if config[:tag_value] do
-            config[:tag]
-          end
-      end)
+      tag_field =
+        Enum.find_value(constraints[:types] || [], fn
+          {_name, config} ->
+            if config[:tag_value] do
+              config[:tag]
+            end
+        end)
 
       {subtypes, acc} =
         Enum.reduce(constraints[:types], {[], acc}, fn {name, config}, {types, acc} ->
@@ -762,8 +790,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
               |> Enum.into(%{}, fn {name, c} ->
                 schema_name = union_variant_schema_name(attr, resource, name) <> "_input"
 
-                {to_string(c[:tag_value]),
-                 "#/components/schemas/#{schema_name}"}
+                {to_string(c[:tag_value]), "#/components/schemas/#{schema_name}"}
               end)
 
             %{
@@ -1443,24 +1470,26 @@ if Code.ensure_loaded?(OpenApiSpex) do
           }
 
         match?(%Schema{}, schema) ->
-          %{schema |
-            properties: Map.put(schema.properties || %{}, tag_field_name, tag_property),
-            required:
-              (schema.required || [])
-              |> Enum.map(&to_string/1)
-              |> Kernel.++([tag_field_name])
-              |> Enum.uniq()
+          %{
+            schema
+            | properties: Map.put(schema.properties || %{}, tag_field_name, tag_property),
+              required:
+                (schema.required || [])
+                |> Enum.map(&to_string/1)
+                |> Kernel.++([tag_field_name])
+                |> Enum.uniq()
           }
 
         is_map(schema) && is_map(Map.get(schema, "properties")) ->
           schema
           |> Map.put("properties", Map.put(schema["properties"], tag_field_name, tag_property))
-          |> Map.put("required",
-               Map.get(schema, "required", [])
-               |> Enum.map(&to_string/1)
-               |> Kernel.++([tag_field_name])
-               |> Enum.uniq()
-             )
+          |> Map.put(
+            "required",
+            Map.get(schema, "required", [])
+            |> Enum.map(&to_string/1)
+            |> Kernel.++([tag_field_name])
+            |> Enum.uniq()
+          )
 
         true ->
           schema
@@ -1711,7 +1740,10 @@ if Code.ensure_loaded?(OpenApiSpex) do
         domain
         |> resources()
         |> Enum.flat_map_reduce(acc, fn resource, acc ->
-          routes = AshJsonApi.Resource.Info.routes(resource, all_domains)
+          routes =
+            resource
+            |> AshJsonApi.Resource.Info.routes(all_domains)
+            |> Enum.reject(& &1.webhook?)
 
           {route_operations, acc} =
             Enum.map_reduce(routes, acc, fn route, acc ->
@@ -3516,118 +3548,5 @@ if Code.ensure_loaded?(OpenApiSpex) do
           properties
       end)
     end
-  end
-
-  defmodule AshJsonApi.OpenApi.AshHooks do
-    @moduledoc false
-
-    @doc false
-    def enabled? do
-      Code.ensure_loaded?(AshHooks.Info) and
-        function_exported?(AshHooks.Info, :webhooks, 1)
-    end
-
-    @doc false
-    def webhooks(domains) when is_list(domains) do
-      if enabled?() do
-        domains
-        |> Enum.flat_map(&Ash.Domain.Info.resources/1)
-        |> Enum.uniq()
-        |> Enum.flat_map(&resource_webhooks/1)
-        |> Map.new()
-      else
-        %{}
-      end
-    end
-
-    defp resource_webhooks(resource) do
-      resource
-      |> declarations()
-      |> then(&webhook_entries(resource, &1))
-    end
-
-    @doc false
-    def webhook_entries(resource, declarations) do
-      declarations
-      |> Enum.map(&webhook_entry(resource, &1))
-      |> Enum.reject(&is_nil/1)
-    end
-
-    defp declarations(resource) do
-      apply(AshHooks.Info, :webhooks, [resource])
-    rescue
-      UndefinedFunctionError -> []
-    end
-
-    defp webhook_entry(resource, declaration) do
-      case declaration_kind(declaration) do
-        :inbound ->
-          {webhook_key(resource, declaration),
-           %{"post" => operation(resource, declaration, :inbound)}}
-        _ -> nil
-      end
-    end
-
-    defp declaration_kind(%{__struct__: struct}) do
-      case Module.split(struct) |> List.last() do
-        "Inbound" -> :inbound
-        "Outbound" -> :outbound
-        _ -> nil
-      end
-    end
-
-    defp declaration_kind(_), do: nil
-
-    defp webhook_key(resource, declaration) do
-      [resource_name(resource), declaration_name(declaration)]
-      |> Enum.join(".")
-    end
-
-    defp operation(resource, declaration, :inbound) do
-      name = declaration_name(declaration)
-
-      %{
-        "operationId" => operation_id(resource, name),
-        "summary" => "Inbound AshHooks webhook: #{name}",
-        "description" => description(name),
-        "x-ash-hooks-direction" => "inbound",
-        "x-ash-hooks-provider" => name,
-        "requestBody" => request_body(),
-        "responses" => %{
-          "2XX" => %{"description" => "Webhook acknowledged."}
-        }
-      }
-    end
-
-    defp description(name),
-      do: "This application receives the #{name} provider webhook. The concrete receiver route is application-defined."
-
-    defp request_body do
-      %{
-        "required" => true,
-        "content" => %{
-          "application/json" => %{
-            "schema" => %{},
-            "description" =>
-              "The payload is validated by the AshHooks provider or event producer."
-          }
-        }
-      }
-    end
-
-    defp operation_id(resource, name) do
-      "receive" <> Macro.camelize(resource_name(resource)) <> Macro.camelize(name) <> "Webhook"
-    end
-
-    defp resource_name(resource) do
-      case AshJsonApi.Resource.Info.type(resource) do
-        nil -> resource |> Module.split() |> List.last() |> Macro.underscore()
-        type -> to_string(type)
-      end
-    rescue
-      _ -> resource |> Module.split() |> List.last() |> Macro.underscore()
-    end
-
-    defp declaration_name(declaration), do: declaration |> Map.get(:name) |> to_string()
   end
 end
