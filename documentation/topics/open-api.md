@@ -113,6 +113,31 @@ To override any value in the OpenApi documentation you can use the `:modify_open
   end
 ```
 
+### AshHooks webhooks
+
+AshHooks is optional. When it is loaded, resources using the AshHooks `webhooks`
+DSL are included automatically in the served OpenAPI document as OpenAPI 3.1
+`webhooks` entries:
+
+```elixir
+defmodule MyApp.FormLedger do
+  use Ash.Resource, extensions: [AshHooks]
+
+  webhooks do
+    inbound :provider
+  end
+end
+```
+
+The generated entries include explicit `x-ash-hooks-direction: inbound`
+metadata. Outbound AshHooks declarations are intentionally not included.
+AshHooks does not declare a concrete Phoenix URL or payload schema, so those
+remain application/provider responsibilities. Inbound controllers still call
+`AshHooks.Ingress.ingest/4` with the raw request body.
+
+When AshHooks is not loaded, AshJsonApi does not add a `webhooks` section and
+continues to serve the existing OpenAPI document unchanged.
+
 ## Generate spec files via CLI
 
 You can write the OpenAPI spec file to disk using the Mix tasks provided by [OpenApiSpex](https://github.com/open-api-spex/open_api_spex).

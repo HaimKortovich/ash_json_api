@@ -124,6 +124,47 @@ if Code.ensure_loaded?(OpenApiSpex) do
       |> modify(conn, opts)
     end
 
+    @doc """
+    Generates the webhook declarations exposed by AshHooks resources.
+
+    AshHooks is an optional integration. When it is not loaded, this function
+    returns an empty map and does not require the dependency at compile time.
+    Only `inbound` declarations are emitted as OpenAPI 3.1 `webhooks` entries;
+    outbound AshHooks declarations are intentionally ignored. AshHooks does not
+    know the concrete Phoenix route used by an inbound controller.
+
+    AshHooks declarations do not contain payload schemas. The generated
+    request body therefore intentionally uses an open JSON schema; the
+    provider's `AshHooks.Provider` implementation remains the source of truth
+    for payload validation.
+    """
+    @spec webhooks([module()] | module()) :: %{String.t() => map()}
+    def webhooks(domains) do
+      AshJsonApi.OpenApi.AshHooks.webhooks(List.wrap(domains))
+    end
+
+    @doc """
+    Builds the JSON OpenAPI document, including optional AshHooks inbound
+    webhook declarations.
+
+    `spec/2` remains the typed OpenApiSpex 3.0 document API. OpenApiSpex does
+    not model the OpenAPI 3.1 root `webhooks` member, so this JSON boundary is
+    the single place where AshJsonApi emits it. AshHooks remains optional.
+    """
+    @spec spec_json(keyword(), Plug.Conn.t() | nil) :: map()
+    def spec_json(opts \\ [], conn \\ nil) do
+      spec = spec(opts, conn) |> OpenApi.to_map()
+      webhook_definitions = webhooks(List.wrap(opts[:domain] || opts[:domains]))
+
+      if map_size(webhook_definitions) == 0 do
+        spec
+      else
+        spec
+        |> Map.put("openapi", "3.1.0")
+        |> Map.put("webhooks", webhook_definitions)
+      end
+    end
+
     defp modify(spec, conn, opts) do
       case opts[:modify_open_api] do
         modify when is_function(modify) ->
@@ -3475,5 +3516,118 @@ if Code.ensure_loaded?(OpenApiSpex) do
           properties
       end)
     end
+  end
+
+  defmodule AshJsonApi.OpenApi.AshHooks do
+    @moduledoc false
+
+    @doc false
+    def enabled? do
+      Code.ensure_loaded?(AshHooks.Info) and
+        function_exported?(AshHooks.Info, :webhooks, 1)
+    end
+
+    @doc false
+    def webhooks(domains) when is_list(domains) do
+      if enabled?() do
+        domains
+        |> Enum.flat_map(&Ash.Domain.Info.resources/1)
+        |> Enum.uniq()
+        |> Enum.flat_map(&resource_webhooks/1)
+        |> Map.new()
+      else
+        %{}
+      end
+    end
+
+    defp resource_webhooks(resource) do
+      resource
+      |> declarations()
+      |> then(&webhook_entries(resource, &1))
+    end
+
+    @doc false
+    def webhook_entries(resource, declarations) do
+      declarations
+      |> Enum.map(&webhook_entry(resource, &1))
+      |> Enum.reject(&is_nil/1)
+    end
+
+    defp declarations(resource) do
+      apply(AshHooks.Info, :webhooks, [resource])
+    rescue
+      UndefinedFunctionError -> []
+    end
+
+    defp webhook_entry(resource, declaration) do
+      case declaration_kind(declaration) do
+        :inbound ->
+          {webhook_key(resource, declaration),
+           %{"post" => operation(resource, declaration, :inbound)}}
+        _ -> nil
+      end
+    end
+
+    defp declaration_kind(%{__struct__: struct}) do
+      case Module.split(struct) |> List.last() do
+        "Inbound" -> :inbound
+        "Outbound" -> :outbound
+        _ -> nil
+      end
+    end
+
+    defp declaration_kind(_), do: nil
+
+    defp webhook_key(resource, declaration) do
+      [resource_name(resource), declaration_name(declaration)]
+      |> Enum.join(".")
+    end
+
+    defp operation(resource, declaration, :inbound) do
+      name = declaration_name(declaration)
+
+      %{
+        "operationId" => operation_id(resource, name),
+        "summary" => "Inbound AshHooks webhook: #{name}",
+        "description" => description(name),
+        "x-ash-hooks-direction" => "inbound",
+        "x-ash-hooks-provider" => name,
+        "requestBody" => request_body(),
+        "responses" => %{
+          "2XX" => %{"description" => "Webhook acknowledged."}
+        }
+      }
+    end
+
+    defp description(name),
+      do: "This application receives the #{name} provider webhook. The concrete receiver route is application-defined."
+
+    defp request_body do
+      %{
+        "required" => true,
+        "content" => %{
+          "application/json" => %{
+            "schema" => %{},
+            "description" =>
+              "The payload is validated by the AshHooks provider or event producer."
+          }
+        }
+      }
+    end
+
+    defp operation_id(resource, name) do
+      "receive" <> Macro.camelize(resource_name(resource)) <> Macro.camelize(name) <> "Webhook"
+    end
+
+    defp resource_name(resource) do
+      case AshJsonApi.Resource.Info.type(resource) do
+        nil -> resource |> Module.split() |> List.last() |> Macro.underscore()
+        type -> to_string(type)
+      end
+    rescue
+      _ -> resource |> Module.split() |> List.last() |> Macro.underscore()
+    end
+
+    defp declaration_name(declaration), do: declaration |> Map.get(:name) |> to_string()
   end
 end
