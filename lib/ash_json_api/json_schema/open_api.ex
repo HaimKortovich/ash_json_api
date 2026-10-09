@@ -35,7 +35,6 @@ if Code.ensure_loaded?(OpenApiSpex) do
     """
     alias Ash.Query.Aggregate
     alias Ash.Resource.{Actions, Relationships}
-    alias AshJsonApi.OpenApi.Webhook
     alias AshJsonApi.Resource.Route
 
     alias OpenApiSpex.{
@@ -123,52 +122,6 @@ if Code.ensure_loaded?(OpenApiSpex) do
         ]
       }
       |> modify(conn, opts)
-    end
-
-    @doc """
-    Builds an OpenAPI JSON document with webhook definitions.
-
-    OpenApiSpex 3.x models the OpenAPI 3.0 root object and therefore cannot
-    represent the OpenAPI 3.1 `webhooks` property on its struct. This function
-    keeps `spec/2` backwards compatible and adds webhooks when the document is
-    rendered as JSON.
-
-    Inbound webhook definitions are discovered from AshHooks declarations on
-    the supplied domains when the optional AshHooks dependency is loaded.
-    """
-    def spec_json(opts \\ [], conn \\ nil) do
-      webhook_definitions =
-        opts
-        |> then(&(&1[:domain] || &1[:domains]))
-        |> List.wrap()
-        |> Webhook.from_domains()
-
-      spec(opts, conn)
-      |> OpenApi.to_map()
-      |> put_webhook_schemas(webhook_definitions)
-      |> Map.put("openapi", if(webhook_definitions == [], do: "3.0.0", else: "3.1.0"))
-      |> Map.put("webhooks", webhook_json(webhook_definitions))
-    end
-
-    defp webhooks(definitions) when is_list(definitions) do
-      definitions
-      |> Enum.map(fn %Webhook{name: name} = webhook -> {name, Webhook.path_item(webhook)} end)
-      |> Map.new()
-    end
-
-    defp webhook_json(definitions) do
-      definitions
-      |> webhooks()
-      |> Map.new(fn {name, path_item} -> {name, OpenApi.to_map(path_item)} end)
-    end
-
-    defp put_webhook_schemas(document, definitions) do
-      schemas =
-        definitions
-        |> Enum.flat_map(&Map.to_list(&1.schemas))
-        |> Map.new(fn {name, schema} -> {name, OpenApi.to_map(schema)} end)
-
-      update_in(document, ["components", "schemas"], &Map.merge(&1 || %{}, schemas))
     end
 
     defp modify(spec, conn, opts) do

@@ -115,26 +115,10 @@ To override any value in the OpenApi documentation you can use the `:modify_open
 
 ## Inbound webhooks
 
-Inbound webhook runtime behavior belongs to AshHooks. AshJsonApi does not
-provide webhook routes, signature verification, secret storage, or management
-resources.
-
-When AshHooks is loaded, `AshJsonApi.OpenApi.spec_json/2` discovers each
-resource's `inbound` declaration and emits it at the root `webhooks` property
-of an OpenAPI 3.1 document. The webhook payload remains owned and validated by
-the AshHooks provider.
-
-```elixir
-AshJsonApi.OpenApi.spec_json(
-  domains: [MyApp.Api],
-  open_api_title: "My App API",
-  open_api_version: "1.0.0"
-)
-```
-
-Applications should mount their HTTP adapter, raw-body reader, signing, and
-delivery handling from AshHooks. AshJsonApi only contributes the normal
-JSON:API document and the generated OpenAPI description.
+AshJsonApi generates the JSON:API document only. Inbound webhook routes,
+signature verification, secret management, and the OpenAPI 3.1 `webhooks`
+document member are owned by the AshHooks router. Mount `AshHooks.Router`
+alongside `AshJsonApi.Router` when an application uses both protocols.
 
 ## Generate spec files via CLI
 
