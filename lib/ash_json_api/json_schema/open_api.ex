@@ -95,6 +95,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
       schema_definitions = AshJsonApi.OpenApi.schemas(domains, acc)
 
       %OpenApi{
+        openapi: "3.1.1",
         info: %Info{
           title: title,
           version: version
@@ -122,6 +123,63 @@ if Code.ensure_loaded?(OpenApiSpex) do
         ]
       }
       |> modify(conn, opts)
+    end
+
+    @doc "Converts an OpenApiSpex document into a normalized OpenAPI 3.1.1 map."
+    def to_map(%OpenApi{} = spec) do
+      spec
+      |> OpenApiSpex.OpenApi.to_map(vendor_extensions: true)
+      |> normalize_openapi_31()
+    end
+
+    def to_map(spec) when is_map(spec), do: normalize_openapi_31(spec)
+
+    defp normalize_openapi_31(document) when is_map(document) do
+      document
+      |> Map.put("openapi", "3.1.1")
+      |> Map.put("jsonSchemaDialect", "https://spec.openapis.org/oas/3.1/dialect/base")
+      |> normalize_openapi_31_value()
+    end
+
+    defp normalize_openapi_31_value(%{"nullable" => true} = schema) do
+      schema = Map.delete(schema, "nullable")
+
+      case Map.get(schema, "type") do
+        type when is_binary(type) ->
+          schema
+          |> Map.put("type", [type, "null"])
+          |> normalize_openapi_31_map_values()
+
+        types when is_list(types) ->
+          schema
+          |> Map.put("type", Enum.uniq(types ++ ["null"]))
+          |> normalize_openapi_31_map_values()
+
+        _ ->
+          case Map.get(schema, "anyOf") do
+            any_of when is_list(any_of) ->
+              schema
+              |> Map.put("anyOf", any_of ++ [%{"type" => "null"}])
+              |> normalize_openapi_31_map_values()
+
+            _ ->
+              schema
+              |> Map.put("anyOf", [%{}, %{"type" => "null"}])
+              |> normalize_openapi_31_map_values()
+          end
+      end
+    end
+
+    defp normalize_openapi_31_value(value) when is_map(value),
+      do: normalize_openapi_31_map_values(value)
+
+    defp normalize_openapi_31_value(value) when is_list(value),
+      do: Enum.map(value, &normalize_openapi_31_value/1)
+
+    defp normalize_openapi_31_value(value), do: value
+
+    defp normalize_openapi_31_map_values(map) do
+      Map.new(map, fn {key, value} -> {key, normalize_openapi_31_value(value)} end)
     end
 
     defp modify(spec, conn, opts) do
@@ -192,7 +250,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
     end
 
     def schemas(domain) do
-      schemas(List.wrap(domain))
+      {schemas, _acc} = schemas(List.wrap(domain), empty_acc())
+      schemas
     end
 
     defp all_resources_requiring_filter_schemas(domains) do
@@ -255,19 +314,12 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp resource_filter_schemas(domains, resource, acc) do
       {field_types, acc} = filter_field_types(resource, acc)
 
-      filter_schema_type =
-        if Application.get_env(:ash_json_api, :use_deep_object_for_filter_type?, true) do
-          :deepObject
-        else
-          :object
-        end
-
       schemas =
         [
           {
             "#{AshJsonApi.Resource.Info.type(resource)}-filter",
             %Schema{
-              type: filter_schema_type,
+              type: :object,
               properties: resource_filter_fields(resource, domains),
               example: "",
               additionalProperties: false,
@@ -390,7 +442,16 @@ if Code.ensure_loaded?(OpenApiSpex) do
           Enum.map(Ash.Resource.Info.public_attributes(resource), & &1.name) ++
             Enum.map(Ash.Resource.Info.public_calculations(resource), & &1.name)
 
-      {properties, acc} = resource_attributes(resource, fields, :json, acc)
+      path = [
+        "components",
+        "schemas",
+        AshJsonApi.Resource.Info.type(resource),
+        "properties",
+        "attributes",
+        "properties"
+      ]
+
+      {properties, acc} = resource_attributes(resource, fields, :json, acc, true, path)
 
       schema =
         %Schema{
@@ -419,9 +480,10 @@ if Code.ensure_loaded?(OpenApiSpex) do
             fields :: nil | list(atom),
             format :: content_type_format(),
             acc :: acc,
-            hide_pkeys? :: boolean()
+            hide_pkeys? :: boolean(),
+            path :: [String.t()]
           ) :: {%{atom => Schema.t()}, acc}
-    defp resource_attributes(resource, fields, format, acc, hide_pkeys? \\ true) do
+    defp resource_attributes(resource, fields, format, acc, hide_pkeys?, path) do
       resource
       |> Ash.Resource.Info.public_attributes()
       |> Enum.concat(Ash.Resource.Info.public_calculations(resource))
@@ -474,19 +536,56 @@ if Code.ensure_loaded?(OpenApiSpex) do
         end
       end)
       |> Enum.reduce({%{}, acc}, fn attr, {attrs, acc} ->
-        {schema, acc} = resource_attribute_type(attr, resource, acc, format)
+        json_key = AshJsonApi.Resource.Info.field_to_json_key(resource, attr.name)
+        attribute_path = (path || []) ++ [json_key]
+        schema_attr = Map.put(attr, :__open_api_path, attribute_path)
+
+        {schema, acc} = resource_attribute_type(schema_attr, resource, acc, format)
 
         schema =
           schema
           |> with_attribute_description(attr)
           |> with_attribute_nullability(attr)
           |> with_comment_on_included(attr, fields)
-
-        json_key =
-          AshJsonApi.Resource.Info.field_to_json_key(resource, attr.name)
+          |> apply_open_api_attribute_transform(resource, attr, attribute_path, :read)
 
         {Map.put(attrs, json_key, schema), acc}
       end)
+    end
+
+    defp apply_open_api_attribute_transform(schema, resource, attribute, path, direction) do
+      case AshJsonApi.Resource.Info.open_api_attribute(resource, attribute.name) do
+        nil ->
+          schema
+
+        %{transform: transform} ->
+          schema =
+            if match?(%Schema{}, schema) do
+              OpenApiSpex.OpenApi.to_map(schema, vendor_extensions: true)
+            else
+              schema
+            end
+
+          context = %{
+            resource: resource,
+            attribute: attribute,
+            path: path,
+            direction: direction
+          }
+
+          transformed =
+            case :erlang.fun_info(transform, :arity) do
+              {:arity, 1} -> transform.(schema)
+              {:arity, 2} -> transform.(schema, context)
+            end
+
+          unless is_map(transformed) do
+            raise ArgumentError,
+                  "OpenAPI attribute transforms must return a schema map, got: #{inspect(transformed)}"
+          end
+
+          transformed
+      end
     end
 
     defp with_comment_on_included(%Schema{} = schema, attr, fields) do
@@ -1075,7 +1174,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 new_acc = %{acc | seen_non_schema_types: [type_key | acc.seen_non_schema_types]}
 
                 {properties, final_acc} =
-                  resource_attributes(instance_of, nil, format, new_acc, false)
+                  resource_attributes(
+                    instance_of,
+                    nil,
+                    format,
+                    new_acc,
+                    false,
+                    nested_attributes_path(attr)
+                  )
 
                 resource_schema =
                   %Schema{
@@ -1110,7 +1216,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
               new_acc = %{acc | seen_non_schema_types: [type_key | acc.seen_non_schema_types]}
 
               {properties, final_acc} =
-                resource_attributes(instance_of, nil, format, new_acc, false)
+                resource_attributes(
+                  instance_of,
+                  nil,
+                  format,
+                  new_acc,
+                  false,
+                  nested_attributes_path(attr)
+                )
 
               schema =
                 %Schema{
@@ -1137,7 +1250,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
       cond do
         AshJsonApi.JsonSchema.embedded?(type) ->
-          {properties, acc} = resource_attributes(type, nil, format, acc, false)
+          {properties, acc} =
+            resource_attributes(type, nil, format, acc, false, nested_attributes_path(attr))
 
           %Schema{
             type: :object,
@@ -1171,6 +1285,10 @@ if Code.ensure_loaded?(OpenApiSpex) do
         true ->
           {%Schema{}, acc}
       end
+    end
+
+    defp nested_attributes_path(attr) do
+      Map.get(attr, :__open_api_path, []) ++ ["properties"]
     end
 
     defp embedded_type_input(
@@ -1288,6 +1406,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
       end
     end
 
+    defp input_schema_path(nil, resource) do
+      ["components", "schemas", AshJsonApi.Resource.Info.type(resource), "properties"]
+    end
+
+    defp input_schema_path(schema_name, _resource) do
+      ["components", "schemas", schema_name, "properties"]
+    end
+
     defp embedded_type_input_impl(attribute, resource, action_type, acc, format, schema_name) do
       create_action =
         case attribute.constraints[:create_action] do
@@ -1309,14 +1435,30 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
       {create_write_attributes, acc} =
         if create_action do
-          write_attributes(resource, create_action.arguments, create_action, nil, acc, format)
+          write_attributes(
+            resource,
+            create_action.arguments,
+            create_action,
+            nil,
+            acc,
+            format,
+            input_schema_path(schema_name, resource)
+          )
         else
           {%{}, acc}
         end
 
       {update_write_attributes, acc} =
         if update_action do
-          write_attributes(resource, update_action.arguments, update_action, nil, acc, format)
+          write_attributes(
+            resource,
+            update_action.arguments,
+            update_action,
+            nil,
+            acc,
+            format,
+            input_schema_path(schema_name, resource)
+          )
         else
           {%{}, acc}
         end
@@ -1912,12 +2054,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 end
 
               style =
-                if (Map.get(schema, :type) == :object || Map.has_key?(schema, "$ref")) &&
-                     location == :query do
-                  :deepObject
-                else
-                  :form
-                end
+                parameter_style(schema, location)
 
               {[
                  %Parameter{
@@ -1979,7 +2116,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
             name: name,
             in: :path,
             required: true,
-            style: :form,
+            style: :simple,
             schema: %Schema{type: :string}
           }
         end)
@@ -2248,11 +2385,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
           end
 
         style =
-          if schema.type == :object && location == :query do
-            :deepObject
-          else
-            :form
-          end
+          parameter_style(schema, location)
 
         param = %Parameter{
           name: argument.name,
@@ -2266,6 +2399,16 @@ if Code.ensure_loaded?(OpenApiSpex) do
         {[param | params], acc}
       end)
       |> then(fn {params, acc} -> {Enum.reverse(params), acc} end)
+    end
+
+    defp parameter_style(_schema, :path), do: :simple
+
+    defp parameter_style(schema, :query) do
+      if Map.get(schema, :type) == :object || Map.has_key?(schema, "$ref") do
+        :deepObject
+      else
+        :form
+      end
     end
 
     @spec request_body(Route.t(), resource :: module) :: {nil | RequestBody.t(), map()}
@@ -2581,9 +2724,21 @@ if Code.ensure_loaded?(OpenApiSpex) do
             action :: term(),
             route :: term(),
             acc :: acc,
-            format :: content_type_format()
+            format :: content_type_format(),
+            path :: [String.t()]
           ) :: {%{atom => Schema.t()}, acc}
-    def write_attributes(resource, arguments, action, route, acc, format) do
+    def write_attributes(resource, arguments, action, route, acc, format, path \\ nil) do
+      path =
+        path ||
+          [
+            "components",
+            "schemas",
+            AshJsonApi.Resource.Info.type(resource),
+            "properties",
+            "attributes",
+            "properties"
+          ]
+
       {attributes, acc} =
         if action.type in [:action, :read] do
           {%{}, acc}
@@ -2592,11 +2747,29 @@ if Code.ensure_loaded?(OpenApiSpex) do
           |> Ash.Resource.Info.attributes()
           |> Enum.filter(&(&1.name in action.accept && &1.writable?))
           |> Enum.reduce({%{}, acc}, fn attribute, {attrs, acc} ->
-            {schema, acc} =
-              resource_write_attribute_type(attribute, resource, action.type, acc, format)
-
             json_key =
               AshJsonApi.Resource.Info.field_to_json_key(resource, attribute.name)
+
+            attribute_path = (path || []) ++ [json_key]
+            schema_attribute = Map.put(attribute, :__open_api_path, attribute_path)
+
+            {schema, acc} =
+              resource_write_attribute_type(
+                schema_attribute,
+                resource,
+                action.type,
+                acc,
+                format
+              )
+
+            schema =
+              apply_open_api_attribute_transform(
+                schema,
+                resource,
+                attribute,
+                attribute_path,
+                :write
+              )
 
             {Map.put(attrs, json_key, schema), acc}
           end)

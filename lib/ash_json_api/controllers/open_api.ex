@@ -25,6 +25,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
       spec =
         conn
         |> spec(Keyword.put(opts, :prefix, prefix))
+        |> AshJsonApi.OpenApi.to_map()
         |> Jason.encode!(pretty: true)
 
       conn

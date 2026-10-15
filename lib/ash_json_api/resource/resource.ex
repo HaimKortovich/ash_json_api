@@ -493,9 +493,43 @@ defmodule AshJsonApi.Resource do
     ]
   }
 
+  @open_api_attribute %Spark.Dsl.Entity{
+    name: :attribute,
+    args: [:name],
+    identifier: :name,
+    target: AshJsonApi.Resource.OpenApiAttribute,
+    describe: "Customize the generated OpenAPI schema for one resource attribute.",
+    examples: [
+      """
+      attribute :email,
+        transform: fn schema, _context ->
+          Map.put(schema, "format", "email")
+        end
+      """
+    ],
+    schema: [
+      name: [
+        type: :atom,
+        required: true,
+        doc: "The Ash attribute to customize."
+      ],
+      transform: [
+        type: {:or, [{:fun, 1}, {:fun, 2}]},
+        required: true,
+        doc: "A function that transforms the generated OpenAPI schema for the attribute."
+      ]
+    ]
+  }
+
+  @open_api %Spark.Dsl.Section{
+    name: :open_api,
+    describe: "OpenAPI schema customization for this resource.",
+    entities: [@open_api_attribute]
+  }
+
   @json_api %Spark.Dsl.Section{
     name: :json_api,
-    sections: [@routes, @primary_key],
+    sections: [@routes, @primary_key, @open_api],
     describe: "Configure the resource's behavior in the JSON:API",
     examples: [
       """
@@ -710,7 +744,8 @@ defmodule AshJsonApi.Resource do
   @transformers [
     AshJsonApi.Resource.Transformers.PrependRoutePrefix,
     AshJsonApi.Resource.Transformers.ValidateNoOverlappingRoutes,
-    AshJsonApi.Resource.Transformers.RequirePrimaryKey
+    AshJsonApi.Resource.Transformers.RequirePrimaryKey,
+    AshJsonApi.Resource.Transformers.VerifyOpenApiAttributes
   ]
 
   @persisters [

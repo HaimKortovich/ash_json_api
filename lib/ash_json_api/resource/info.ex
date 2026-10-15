@@ -11,6 +11,16 @@ defmodule AshJsonApi.Resource.Info do
     Extension.get_opt(resource, [:json_api], :type, nil, false)
   end
 
+  @doc "Returns per-attribute OpenAPI schema customizations for the resource."
+  def open_api_attributes(resource) do
+    Extension.get_entities(resource, [:json_api, :open_api])
+  end
+
+  @doc "Returns the OpenAPI schema customization for an attribute, if configured."
+  def open_api_attribute(resource, name) do
+    Enum.find(open_api_attributes(resource), &(&1.name == name))
+  end
+
   def derive_filter?(resource) do
     Extension.get_opt(resource, [:json_api], :derive_filter?, true, false)
   end

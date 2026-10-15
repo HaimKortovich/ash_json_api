@@ -393,7 +393,7 @@ defmodule Test.Acceptance.OpenApiTest do
            |> sent_resp()
            |> elem(2)
            |> Jason.decode!()
-           |> Kernel.==(Jason.decode!(Jason.encode!(api_spec)))
+           |> Kernel.==(AshJsonApi.OpenApi.to_map(api_spec))
   end
 
   test "modify option is honored", %{open_api_spec: api_spec} do
@@ -530,7 +530,7 @@ defmodule Test.Acceptance.OpenApiTest do
                name: "job_id",
                in: :path,
                required: true,
-               style: :form,
+               style: :simple,
                schema: %Schema{type: :string}
              }
            ]
@@ -576,7 +576,7 @@ defmodule Test.Acceptance.OpenApiTest do
                in: :path,
                required: true,
                schema: %OpenApiSpex.Schema{enum: ["one", "two"], type: :string},
-               style: :form
+               style: :simple
              }
            ]
   end
@@ -606,7 +606,7 @@ defmodule Test.Acceptance.OpenApiTest do
   end
 
   describe "Index route" do
-    test "filter parameter uses :deepObject type by default", %{
+    test "filter parameter uses deepObject serialization with an object schema", %{
       open_api_spec: %OpenApi{} = api_spec
     } do
       %Operation{} = operation = api_spec.paths["/posts"].get
@@ -619,7 +619,7 @@ defmodule Test.Acceptance.OpenApiTest do
       assert schema = api_spec.components.schemas["post-filter"]
 
       assert schema == %Schema{
-               type: :deepObject,
+               type: :object,
                description: "Filters the query to results matching the given filter object",
                properties: %{
                 author: %Reference{"$ref": "#/components/schemas/author-filter"},
@@ -1007,7 +1007,7 @@ defmodule Test.Acceptance.OpenApiTest do
       %Parameter{} = filter = operation.parameters |> Enum.find(&(&1.name == "id"))
       assert filter.in == :path
       assert filter.required == true
-      assert filter.style == :form
+      assert filter.style == :simple
       %Schema{} = schema = filter.schema
       assert schema.type == :string
     end
