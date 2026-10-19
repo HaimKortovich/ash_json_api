@@ -363,4 +363,59 @@ defmodule Test.Acceptance.JsonSchemaTest do
       end
     end
   end
+
+  describe "union attribute schema" do
+    defmodule TaggedValue do
+      use Ash.TypedStruct
+
+      typed_struct do
+        field(:value, :string, allow_nil?: false)
+      end
+    end
+
+    defmodule TaggedPayload do
+      use Ash.Type.NewType,
+        subtype_of: :union,
+        constraints: [
+          storage: :map_with_tag,
+          types: [
+            email: [type: TaggedValue, tag: :type, tag_value: "email"],
+            phone: [type: TaggedValue, tag: :type, tag_value: "phone"]
+          ]
+        ]
+    end
+
+    defmodule UntaggedPayload do
+      use Ash.Type.NewType,
+        subtype_of: :union,
+        constraints: [
+          types: [
+            string: [type: :string],
+            integer: [type: :integer]
+          ]
+        ]
+    end
+
+    test "discriminated union renders oneOf with tag enums" do
+      schema = AshJsonApi.JsonSchema.attribute_schema(%{type: TaggedPayload, constraints: []})
+
+      assert %{"oneOf" => [email_variant, phone_variant]} = schema
+      assert schema["discriminator"]["propertyName"] == "type"
+
+      assert get_in(email_variant, ["properties", "type", "enum"]) == ["email"]
+      assert get_in(phone_variant, ["properties", "type", "enum"]) == ["phone"]
+
+      assert email_variant["type"] == "object"
+      assert "type" in email_variant["required"]
+      assert "value" in email_variant["required"]
+    end
+
+    test "untagged union renders anyOf" do
+      schema = AshJsonApi.JsonSchema.attribute_schema(%{type: UntaggedPayload, constraints: []})
+
+      assert Map.has_key?(schema, "anyOf")
+      assert length(schema["anyOf"]) == 2
+      refute Map.has_key?(schema, "discriminator")
+    end
+  end
 end

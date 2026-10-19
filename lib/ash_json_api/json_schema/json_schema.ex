@@ -519,6 +519,77 @@ defmodule AshJsonApi.JsonSchema do
     }
   end
 
+  defp resource_attribute_type(%{type: Ash.Type.Union, constraints: constraints} = attr) do
+    types = constraints[:types] || []
+
+    tag_field =
+      Enum.find_value(types, fn {_name, config} ->
+        if config[:tag_value], do: config[:tag]
+      end)
+
+    subtypes =
+      Enum.map(types, fn {_name, config} ->
+        fake_attr = %{
+          attr
+          | type: Ash.Type.get_type(config[:type]),
+            constraints: config[:constraints] || []
+        }
+
+        schema = resource_attribute_type(fake_attr)
+
+        case {tag_field, config[:tag_value]} do
+          {tag, value} when not is_nil(tag) and not is_nil(value) ->
+            properties =
+              schema
+              |> Map.get("properties", %{})
+              |> Map.put(to_string(tag), %{"type" => "string", "enum" => [to_string(value)]})
+
+            schema
+            |> Map.put("properties", properties)
+            |> Map.update("required", [], &Enum.uniq(&1 ++ [to_string(tag)]))
+
+          _ ->
+            schema
+        end
+      end)
+
+    case tag_field do
+      nil ->
+        %{"anyOf" => subtypes}
+
+      tag ->
+        %{
+          "oneOf" => subtypes,
+          "discriminator" => %{"propertyName" => to_string(tag), "mapping" => %{}}
+        }
+    end
+  end
+
+  defp resource_attribute_type(%{type: Ash.Type.Struct, constraints: constraints}) do
+    case constraints[:fields] do
+      fields when is_list(fields) and fields != [] ->
+        properties =
+          Map.new(fields, fn {name, field_constraints} ->
+            {to_string(name),
+             resource_attribute_type(%{
+               type: Ash.Type.get_type(field_constraints[:type]),
+               constraints: field_constraints[:constraints] || []
+             })}
+          end)
+
+        required =
+          fields
+          |> Enum.filter(fn {_name, field_constraints} -> field_constraints[:allow_nil?] == false end)
+          |> Enum.map(fn {name, _} -> to_string(name) end)
+
+        schema = %{"type" => "object", "properties" => properties}
+        if required == [], do: schema, else: Map.put(schema, "required", required)
+
+      _ ->
+        %{"type" => "object"}
+    end
+  end
+
   defp resource_attribute_type(%{type: type} = attr) do
     constraints = attr.constraints
 
@@ -535,7 +606,7 @@ defmodule AshJsonApi.JsonSchema do
         |> add_null_for_non_required()
 
       Ash.Type.NewType.new_type?(type) ->
-        new_constraints = Ash.Type.NewType.constraints(type, constraints)
+        new_constraints = new_type_constraints(type, constraints)
         new_type = Ash.Type.NewType.subtype_of(type)
 
         resource_attribute_type(Map.merge(attr, %{type: new_type, constraints: new_constraints}))
@@ -547,6 +618,17 @@ defmodule AshJsonApi.JsonSchema do
         %{
           "type" => "any"
         }
+    end
+  end
+
+  defp new_type_constraints(type, constraints) do
+    stored =
+      if function_exported?(type, :subtype_constraints, 0),
+        do: type.subtype_constraints() || []
+
+    case constraints || [] do
+      [] -> stored || []
+      keyword -> Keyword.merge(stored || [], keyword)
     end
   end
 

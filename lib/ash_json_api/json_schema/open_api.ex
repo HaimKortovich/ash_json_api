@@ -874,7 +874,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
             {type.json_write_schema(attr.constraints), acc}
 
           Ash.Type.NewType.new_type?(type) ->
-            new_constraints = Ash.Type.NewType.constraints(type, attr.constraints)
+            new_constraints = new_type_constraints(type, attr.constraints)
             new_type = Ash.Type.NewType.subtype_of(type)
 
             resource_write_attribute_type(
@@ -1266,7 +1266,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
           {type.json_schema(constraints), acc}
 
         Ash.Type.NewType.new_type?(type) ->
-          new_constraints = Ash.Type.NewType.constraints(type, constraints)
+          new_constraints = new_type_constraints(type, constraints)
           new_type = Ash.Type.NewType.subtype_of(type)
 
           resource_attribute_type(
@@ -1289,6 +1289,17 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
     defp nested_attributes_path(attr) do
       Map.get(attr, :__open_api_path, []) ++ ["properties"]
+    end
+
+    defp new_type_constraints(type, constraints) do
+      stored =
+        if function_exported?(type, :subtype_constraints, 0),
+          do: type.subtype_constraints() || []
+
+      case constraints || [] do
+        [] -> stored || []
+        keyword -> Keyword.merge(stored || [], keyword)
+      end
     end
 
     defp embedded_type_input(
