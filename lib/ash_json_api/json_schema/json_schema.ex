@@ -579,7 +579,9 @@ defmodule AshJsonApi.JsonSchema do
 
         required =
           fields
-          |> Enum.filter(fn {_name, field_constraints} -> field_constraints[:allow_nil?] == false end)
+          |> Enum.filter(fn {_name, field_constraints} ->
+            field_constraints[:allow_nil?] == false and is_nil(field_constraints[:default])
+          end)
           |> Enum.map(fn {name, _} -> to_string(name) end)
 
         schema = %{"type" => "object", "properties" => properties}
