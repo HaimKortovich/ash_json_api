@@ -2908,7 +2908,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         response = %Response{
           description: "Success",
           content: %{
-            "application/octet-stream" => %MediaType{
+            "*/*" => %MediaType{
               schema: %Schema{type: :string, format: :binary}
             }
           }
