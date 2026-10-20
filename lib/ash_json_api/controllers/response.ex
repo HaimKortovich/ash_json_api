@@ -66,7 +66,7 @@ defmodule AshJsonApi.Controllers.Response do
         |> Plug.Conn.put_resp_content_type(content_type)
         |> Plug.Conn.put_resp_header("content-disposition", filename)
         |> Plug.Conn.put_status(status)
-        |> Plug.Conn.send_resp()
+        |> Plug.Conn.send_resp(status, data)
 
       {:error, _error} ->
         render_errors(conn, request, status_code: 500)
