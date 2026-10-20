@@ -565,7 +565,7 @@ defmodule AshJsonApi.JsonSchema do
     end
   end
 
-  defp resource_attribute_type(%{type: Ash.Type.Struct, constraints: constraints}) do
+  defp resource_attribute_type(%{type: Ash.Type.Struct, constraints: constraints} = attr) do
     case constraints[:fields] do
       fields when is_list(fields) and fields != [] ->
         properties =
@@ -579,8 +579,9 @@ defmodule AshJsonApi.JsonSchema do
 
         required =
           fields
-          |> Enum.filter(fn {_name, field_constraints} ->
-            field_constraints[:allow_nil?] == false and is_nil(field_constraints[:default])
+          |> Enum.reject(fn {name, field_constraints} ->
+            field_constraints[:allow_nil?] != false or
+              has_default?(constraints[:instance_of], name, field_constraints)
           end)
           |> Enum.map(fn {name, _} -> to_string(name) end)
 
@@ -590,6 +591,21 @@ defmodule AshJsonApi.JsonSchema do
       _ ->
         %{"type" => "object"}
     end
+  end
+
+  defp has_default?(instance_of, name, field_constraints) do
+    not is_nil(field_constraints[:default]) or
+      (is_atom(instance_of) and typed_struct_field_has_default?(instance_of, name))
+  end
+
+  defp typed_struct_field_has_default?(instance_of, name) do
+    Code.ensure_loaded?(Ash.TypedStruct.Info) and
+      function_exported?(Ash.TypedStruct.Info, :fields, 1) and
+      instance_of
+      |> Ash.TypedStruct.Info.fields()
+      |> Enum.any?(&(&1.name == name and not is_nil(&1.default)))
+  rescue
+    _ -> false
   end
 
   defp resource_attribute_type(%{type: type} = attr) do

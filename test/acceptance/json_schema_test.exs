@@ -418,4 +418,51 @@ defmodule Test.Acceptance.JsonSchemaTest do
       refute Map.has_key?(schema, "discriminator")
     end
   end
+
+  describe "typed struct schema" do
+    defmodule DefaultedStruct do
+      use Ash.TypedStruct
+
+      typed_struct do
+        field(:name, :string, allow_nil?: false)
+        field(:source, :atom, allow_nil?: false, default: :api)
+        field(:count, :integer, allow_nil?: false, default: fn -> 0 end)
+        field(:note, :string)
+      end
+    end
+
+    test "fields with defaults are not required" do
+      schema = AshJsonApi.JsonSchema.attribute_schema(%{type: DefaultedStruct, constraints: []})
+
+      assert schema["required"] == ["name"]
+      assert schema["type"] == "object"
+
+      assert "source" in Map.keys(schema["properties"])
+      assert "count" in Map.keys(schema["properties"])
+      assert "note" in Map.keys(schema["properties"])
+      refute "note" in schema["required"]
+    end
+
+    test "structs without a declaring typed struct keep constraints-derived required fields" do
+      schema =
+        AshJsonApi.JsonSchema.attribute_schema(%{
+          type: Ash.Type.Struct,
+          constraints: [
+            fields: [
+              name: [type: :string, allow_nil?: false],
+              extra: [type: :string, allow_nil?: false, default: "x"]
+            ]
+          ]
+        })
+
+      assert schema["required"] == ["name"]
+    end
+
+    test "plain struct without fields renders an open object" do
+      schema =
+        AshJsonApi.JsonSchema.attribute_schema(%{type: Ash.Type.Struct, constraints: []})
+
+      assert schema == %{"type" => "object"}
+    end
+  end
 end
