@@ -23,21 +23,52 @@ defmodule AshJsonApi.Controllers.Response do
   # sobelow_skip ["XSS.SendResp"]
   def render_generic_action_result(conn, request, status, result, returns) do
     if returns do
-      result
-      |> AshJsonApi.Serializer.serialize_value(
-        request.action.returns,
-        request.action.constraints,
-        request.domain
-      )
-      |> then(fn serialized ->
-        if request.route.wrap_in_result? do
-          send_resp(conn, status, Jason.encode!(%{result: serialized}))
-        else
-          send_resp(conn, status, Jason.encode!(serialized))
-        end
-      end)
+      if match?(%Ash.Type.File{}, result) do
+        render_file_result(conn, request, status, result)
+      else
+        result
+        |> AshJsonApi.Serializer.serialize_value(
+          request.action.returns,
+          request.action.constraints,
+          request.domain
+        )
+        |> then(fn serialized ->
+          if request.route.wrap_in_result? do
+            send_resp(conn, status, Jason.encode!(%{result: serialized}))
+          else
+            send_resp(conn, status, Jason.encode!(serialized))
+          end
+        end)
+      end
     else
       send_resp(conn, status, @generic_action_no_return_success)
+    end
+  end
+
+  defp render_file_result(conn, request, status, %Ash.Type.File{} = file) do
+    content_type =
+      case Ash.Type.File.content_type(file) do
+        {:ok, content_type} -> content_type
+        _ -> "application/octet-stream"
+      end
+
+    filename =
+      case Ash.Type.File.filename(file) do
+        {:ok, filename} -> ~s(inline; filename="#{filename}")
+        _ -> "inline"
+      end
+
+    case Ash.Type.File.open(file, [:read, :binary]) do
+      {:ok, device} ->
+        data = IO.binread(device, :eof)
+
+        conn
+        |> Plug.Conn.put_resp_content_type(content_type)
+        |> Plug.Conn.put_resp_header("content-disposition", filename)
+        |> send_resp(status, data)
+
+      {:error, _error} ->
+        render_errors(conn, request, status_code: 500)
     end
   end
 

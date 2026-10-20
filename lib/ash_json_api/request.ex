@@ -43,6 +43,7 @@ defmodule AshJsonApi.Request do
     :json_api_prefix,
     :actor,
     :tenant,
+    :as_of,
     :context,
     :schema,
     :req_headers,
@@ -123,6 +124,7 @@ defmodule AshJsonApi.Request do
     |> parse_sort_included()
     |> parse_included_page()
     |> parse_includes()
+    |> parse_as_of()
     |> parse_filter()
     |> parse_sort()
     |> parse_attributes()
@@ -138,6 +140,7 @@ defmodule AshJsonApi.Request do
       authorize?: AshJsonApi.Domain.Info.authorize?(request.domain),
       tenant: request.tenant
     ]
+    |> maybe_put_as_of(request)
   end
 
   def load_opts(request, merge) do
@@ -178,8 +181,17 @@ defmodule AshJsonApi.Request do
         opts
       end
 
-    Keyword.merge(merge, opts)
+    opts
+    |> maybe_put_as_of(request)
+    |> then(&Keyword.merge(merge, &1))
   end
+
+  defp maybe_put_as_of(opts, %{action: %{type: :read}, as_of: as_of})
+       when not is_nil(as_of) do
+    Keyword.put(opts, :as_of, as_of)
+  end
+
+  defp maybe_put_as_of(opts, _request), do: opts
 
   def assign(request, key, value) do
     %{request | assigns: Map.put(request.assigns, key, value)}
@@ -924,6 +936,31 @@ defmodule AshJsonApi.Request do
   end
 
   defp parse_sort(request), do: %{request | sort: []}
+
+  defp parse_as_of(%{action: %{type: :read}, query_params: %{"as_of" => as_of}} = request)
+       when is_binary(as_of) do
+    case Ash.Type.cast_input(:utc_datetime_usec, as_of, []) do
+      {:ok, nil} ->
+        request
+
+      {:ok, as_of} ->
+        %{request | as_of: as_of}
+
+      {:error, _} ->
+        add_error(
+          request,
+          InvalidField.exception(
+            type: AshJsonApi.Resource.Info.type(request.resource),
+            field: :as_of,
+            source_parameter: "as_of",
+            detail: "as_of must be an ISO 8601 datetime"
+          ),
+          request.route.type
+        )
+    end
+  end
+
+  defp parse_as_of(request), do: request
 
   defp trim_sort_order("-" <> field_name) do
     {:desc, field_name}

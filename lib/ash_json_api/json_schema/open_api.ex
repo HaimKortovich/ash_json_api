@@ -1957,6 +1957,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
               [
                 filter_parameter(resource, route),
                 sort_parameter(resource, route),
+                as_of_parameter(resource),
                 page_parameter(Ash.Resource.Info.action(resource, route.action)),
                 include_parameter(resource),
                 included_page_parameter(resource),
@@ -1980,6 +1981,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         type when type in [:get, :related] ->
           static_params =
             [
+              as_of_parameter(resource),
               include_parameter(resource),
               included_page_parameter(resource),
               fields_parameter(resource)
@@ -2133,6 +2135,28 @@ if Code.ensure_loaded?(OpenApiSpex) do
         end)
 
       route_params_to_add ++ Enum.sort_by(params, &(&1.in == :query))
+    end
+    @spec as_of_parameter(resource :: module) :: Parameter.t() | nil
+    defp as_of_parameter(resource) do
+      if temporal_resource?(resource) do
+        %Parameter{
+          name: :as_of,
+          in: :query,
+          description:
+            "Read the resource as of an instant (time travel) for temporal resources",
+          required: false,
+          schema: %Schema{
+            type: :string,
+            format: "date-time"
+          }
+        }
+      end
+    end
+
+    defp temporal_resource?(resource) do
+      Code.ensure_loaded?(Ash.Resource.Info) and
+        function_exported?(Ash.Resource.Info, :temporal?, 1) and
+        apply(Ash.Resource.Info, :temporal?, [resource])
     end
 
     @spec filter_parameter(resource :: module, route :: AshJsonApi.Resource.Route.t()) ::
@@ -2878,18 +2902,33 @@ if Code.ensure_loaded?(OpenApiSpex) do
     end
 
     defp response_body(route, resource, acc) do
-      {schema, acc} = response_schema(route, resource, acc)
+      action = Ash.Resource.Info.action(resource, route.action)
 
-      response = %Response{
-        description: "Success",
-        content: %{
-          "application/vnd.api+json" => %MediaType{
-            schema: schema
+      if route.type == :route && action.returns == Ash.Type.File do
+        response = %Response{
+          description: "Success",
+          content: %{
+            "application/octet-stream" => %MediaType{
+              schema: %Schema{type: :string, format: :binary}
+            }
           }
         }
-      }
 
-      {response, acc}
+        {response, acc}
+      else
+        {schema, acc} = response_schema(route, resource, acc)
+
+        response = %Response{
+          description: "Success",
+          content: %{
+            "application/vnd.api+json" => %MediaType{
+              schema: schema
+            }
+          }
+        }
+
+        {response, acc}
+      end
     end
 
     @spec response_schema(Route.t(), resource :: module, acc :: acc()) :: {Schema.t(), acc()}
