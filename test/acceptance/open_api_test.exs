@@ -1179,6 +1179,43 @@ defmodule Test.Acceptance.OpenApiTest do
   end
 
   describe "Union type discriminator" do
+    test "filter components expose tagged-union variant names and typed variant paths", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      filter_schema = api_spec.components.schemas["content-filter"]
+
+      assert %Reference{"$ref": "#/components/schemas/content-filter-shape"} =
+               filter_schema.properties.shape
+
+      assert %Schema{anyOf: paths} = api_spec.components.schemas["content-filter-shape"]
+
+      assert Enum.any?(paths, fn
+               %Schema{
+                 properties: %{
+                   at_path: %Schema{enum: [["type"]]},
+                   eq: %Schema{enum: ["circle", "square", "note"]}
+                 }
+               } ->
+                 true
+
+               _ ->
+                 false
+             end)
+
+      assert Enum.any?(paths, fn
+               %Schema{
+                 properties: %{
+                   at_path: %Schema{enum: [["value", "radius"]]},
+                   eq: %Schema{type: :integer}
+                 }
+               } ->
+                 true
+
+               _ ->
+                 false
+             end)
+    end
+
     test "tagged union uses $ref and includes discriminator with mapping", %{
       open_api_spec: %OpenApi{} = api_spec
     } do

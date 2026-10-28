@@ -3262,40 +3262,52 @@ if Code.ensure_loaded?(OpenApiSpex) do
       {type, constraints} = unwrap_new_type(type, constraints)
       type = embedded_resource_type(type, constraints)
 
-      if embedded_resource?(type) do
-        paths = embedded_filter_paths(type, resource, [], MapSet.new())
+      cond do
+        type == Ash.Type.Union ->
+          if constraints[:storage] == :map_with_tag do
+            {nil, acc}
+          else
+            {schema, acc} = union_filter_schema(resource, constraints, acc, [])
+            {schema, acc}
+          end
 
-        {path_schemas, acc} =
-          Enum.reduce(paths, {[], acc}, fn {path, leaf}, {schemas, acc} ->
-            {schema, acc} = raw_filter_type(leaf, resource, acc)
+        embedded_resource?(type) ->
+          paths = embedded_filter_paths(type, resource, [], MapSet.new())
 
-            if schema do
-              at_path = %Schema{
-                type: :array,
-                items: %Schema{type: :string},
-                enum: [Enum.map(path, &to_string/1)]
-              }
+          {path_schemas, acc} =
+            Enum.reduce(paths, {[], acc}, fn {path, leaf}, {schemas, acc} ->
+              {schema, acc} = raw_filter_type(leaf, resource, acc)
 
-              schema = %{
-                schema
-                | properties: Map.put(schema.properties || %{}, :at_path, at_path),
-                  required: [:at_path],
-                  additionalProperties: false
-              }
+              if schema do
+                schema = add_filter_enum(schema, leaf)
 
-              {[schema | schemas], acc}
-            else
-              {schemas, acc}
-            end
-          end)
+                at_path = %Schema{
+                  type: :array,
+                  items: %Schema{type: :string},
+                  enum: [Enum.map(path, &to_string/1)]
+                }
 
-        case Enum.reverse(path_schemas) do
-          [] -> {nil, acc}
-          [schema] -> {schema, acc}
-          schemas -> {%Schema{anyOf: schemas}, acc}
-        end
-      else
-        raw_filter_type_non_embedded(attribute, resource, acc)
+                schema = %{
+                  schema
+                  | properties: Map.put(schema.properties || %{}, :at_path, at_path),
+                    required: [:at_path],
+                    additionalProperties: false
+                }
+
+                {[schema | schemas], acc}
+              else
+                {schemas, acc}
+              end
+            end)
+
+          case Enum.reverse(path_schemas) do
+            [] -> {nil, acc}
+            [schema] -> {schema, acc}
+            schemas -> {%Schema{anyOf: schemas}, acc}
+          end
+
+        true ->
+          raw_filter_type_non_embedded(attribute, resource, acc)
       end
     end
 
@@ -3350,10 +3362,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
             embedded_resource?(attribute_type) ->
               embedded_filter_paths(attribute_type, resource, path, seen)
 
-            # Union traversal is intentionally excluded until Ash's path handling and
-            # variant semantics are characterized. Keep it out of the generated schema.
             attribute_type == Ash.Type.Union ->
-              []
+              union_filter_paths(attribute_type, constraints, path)
 
             match?({:array, _}, attribute_type) ->
               []
@@ -3365,6 +3375,176 @@ if Code.ensure_loaded?(OpenApiSpex) do
         end)
       else
         []
+      end
+    end
+
+    defp union_filter_schema(resource, constraints, acc, prefix) do
+      paths = union_filter_paths(Ash.Type.Union, constraints, prefix)
+
+      {schemas, acc} =
+        Enum.reduce(paths, {[], acc}, fn {path, leaf}, {schemas, acc} ->
+          {schema, acc} = raw_filter_type(leaf, resource, acc)
+
+          if schema do
+            schema =
+              if path == prefix ++ [:type] do
+                enum = Enum.map(constraints[:types] || [], fn {name, _} -> to_string(name) end)
+                eq_schema = Map.update!(schema.properties, :eq, &%{&1 | enum: enum})
+                %{schema | properties: eq_schema}
+              else
+                schema
+              end
+
+            at_path = %Schema{
+              type: :array,
+              items: %Schema{type: :string},
+              enum: [Enum.map(path, &to_string/1)]
+            }
+
+            schema = %{
+              schema
+              | properties: Map.put(schema.properties || %{}, :at_path, at_path),
+                required: [:at_path],
+                additionalProperties: false
+            }
+
+            {[schema | schemas], acc}
+          else
+            {schemas, acc}
+          end
+        end)
+
+      case Enum.reverse(schemas) do
+        [] -> {nil, acc}
+        [schema] -> {schema, acc}
+        schemas -> {%Schema{anyOf: schemas}, acc}
+      end
+    end
+
+    defp union_filter_paths(Ash.Type.Union, constraints, prefix) do
+      variants = constraints[:types] || []
+      storage = constraints[:storage] || :type_and_value
+
+      discriminator =
+        %Ash.Resource.Attribute{
+          name: :type,
+          type: Ash.Type.String,
+          constraints: [],
+          public?: true
+        }
+
+      discriminator_schema_path = prefix ++ [:type]
+
+      discriminator =
+        Map.put(discriminator, :constraints,
+          one_of: Enum.map(variants, &(elem(&1, 0) |> to_string()))
+        )
+
+      discriminator_paths = [{discriminator_schema_path, discriminator}]
+
+      variant_paths =
+        if storage == :map_with_tag do
+          []
+        else
+          Enum.flat_map(variants, fn {_variant_name, config} ->
+            {variant_type, variant_constraints} =
+              unwrap_new_type(config[:type], config[:constraints] || [])
+
+            case embedded_resource_type(variant_type, variant_constraints) do
+              embedded when is_atom(embedded) and embedded != Ash.Type.Struct ->
+                if embedded_resource?(embedded) do
+                  value_prefix = prefix ++ [:value]
+
+                  embedded
+                  |> Ash.Resource.Info.public_attributes()
+                  |> Enum.filter(&(&1.filterable? != false))
+                  |> Enum.flat_map(fn attribute ->
+                    {type, constraints} = unwrap_new_type(attribute.type, attribute.constraints)
+                    type = embedded_resource_type(type, constraints)
+
+                    if type == Ash.Type.Union or match?({:array, _}, type) or
+                         embedded_resource?(type) do
+                      []
+                    else
+                      [
+                        {value_prefix ++ [attribute.name],
+                         %{attribute | type: type, constraints: constraints}}
+                      ]
+                    end
+                  end)
+                else
+                  []
+                end
+
+              type when is_atom(type) and type != Ash.Type.Union ->
+                leaf = %{
+                  discriminator
+                  | name: :value,
+                    type: type,
+                    constraints: variant_constraints
+                }
+
+                [{prefix ++ [:value], leaf}]
+
+              _ ->
+                []
+            end
+          end)
+        end
+
+      compatible_variant_paths =
+        variant_paths
+        |> Enum.group_by(&elem(&1, 0))
+        |> Enum.flat_map(fn {path, entries} ->
+          signatures =
+            Enum.uniq(Enum.map(entries, fn {_path, leaf} -> {leaf.type, leaf.constraints} end))
+
+          if length(signatures) == 1 and union_variant_path_accessible?(variants, path) do
+            [{path, hd(entries) |> elem(1)}]
+          else
+            []
+          end
+        end)
+
+      if storage == :map_with_tag do
+        []
+      else
+        discriminator_paths ++ compatible_variant_paths
+      end
+    end
+
+    defp union_variant_path_accessible?(variants, path) do
+      field = List.last(path)
+
+      Enum.all?(variants, fn {_variant_name, config} ->
+        {type, constraints} = unwrap_new_type(config[:type], config[:constraints] || [])
+        type = embedded_resource_type(type, constraints)
+
+        if embedded_resource?(type) do
+          matching =
+            Ash.Resource.Info.attributes(type)
+            |> Enum.filter(&(to_string(&1.name) == to_string(field)))
+
+          Enum.all?(matching, &(&1.public? and &1.filterable? != false))
+        else
+          true
+        end
+      end)
+    end
+
+    defp add_filter_enum(schema, %{constraints: constraints}) do
+      case constraints[:one_of] do
+        values when is_list(values) ->
+          Map.update!(schema, :properties, fn properties ->
+            Map.update!(
+              properties,
+              :eq,
+              &%{&1 | enum: Enum.map(values, fn value -> to_string(value) end)}
+            )
+          end)
+
+        _ ->
+          schema
       end
     end
 
@@ -3670,7 +3850,9 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
     defp filterable?(%{type: {:array, _}}, _), do: false
     defp filterable?(%{filterable?: false}, _), do: false
-    defp filterable?(%{type: Ash.Type.Union}, _), do: false
+
+    defp filterable?(%{type: Ash.Type.Union, constraints: constraints}, _resource),
+      do: constraints[:storage] != :map_with_tag and constraints[:types] not in [nil, []]
 
     defp filterable?(%Ash.Resource.Calculation{type: type, calculation: {module, _opts}}, _) do
       !AshJsonApi.JsonSchema.embedded?(type) && function_exported?(module, :expression, 2)

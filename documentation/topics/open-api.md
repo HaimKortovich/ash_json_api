@@ -204,7 +204,25 @@ For URL query parameters, encode each path as an indexed list, for example:
 ?filter[and][0][bio][at_path][]=nationality&filter[and][0][bio][eq]=KR&filter[and][1][bio][at_path][]=age&filter[and][1][bio][gte]=25
 ```
 
-Only public, filterable scalar fields and nested single embeds are included. Paths to private fields, arrays of embeds, and union variants are not supported by the generated filter schema; invalid embedded paths are rejected by JSON:API requests. This is partial-field filtering, not whole-embed equality.
+Only public, filterable scalar fields and nested single embeds are included. Paths to private fields and arrays of embeds are not supported by the generated filter schema; invalid embedded paths are rejected by JSON:API requests. Union filtering is described below. This is partial-field filtering, not whole-embed equality.
+
+### Filtering union variants
+
+For unions with the default `type_and_value` storage, filter by the Ash variant name using the `type` path:
+
+```text
+?filter[insured_object][at_path][]=type&filter[insured_object][eq]=auto
+```
+
+The value (`auto` above) is the union's configured variant name, not necessarily its storage tag value. For example, if the union variant is named `car` and has `tag_value: "auto"`, filter with `eq=car`.
+
+For an embedded-resource variant using default storage, variant fields can be filtered at `value` followed by the field name, and combined with the discriminator using `and`:
+
+```text
+?filter[and][0][insured_object][at_path][]=type&filter[and][0][insured_object][eq]=auto&filter[and][1][insured_object][at_path][]=value&filter[and][1][insured_object][at_path][]=registration&filter[and][1][insured_object][eq]=ABC123
+```
+
+`map_with_tag` unions are not currently exposed for filtering. Their discriminator resolves to the internal variant name in ETS but to the configured storage tag in PostgreSQL, so the same filter would not behave consistently across data layers. Arrays of unions and paths through nested union variants are also excluded. Whole-union equality remains distinct from discriminator filtering.
 
 ### Filter Schema Type
 

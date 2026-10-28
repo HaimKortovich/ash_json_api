@@ -89,6 +89,17 @@ defmodule AshJsonApi.OpenApiTest do
       uuid_primary_key(:id, writable?: true)
       attribute(:view_count, :integer, public?: true, description: "View count of the post")
       attribute(:bio, Bio, public?: true)
+      attribute(:shape, Shape, public?: true)
+
+      attribute(:direct_shape, :union,
+        public?: true,
+        constraints: [
+          types: [
+            circle: [type: Circle, tag: :type, tag_value: "circle"],
+            label: [type: :string, tag: :type, tag_value: "label"]
+          ]
+        ]
+      )
     end
 
     relationships do
@@ -126,6 +137,50 @@ defmodule AshJsonApi.OpenApiTest do
       {result, _acc} = OpenApi.filter_type(attribute, Post, OpenApi.empty_acc())
 
       assert [{"post-filter-bio", %OpenApiSpex.Schema{anyOf: [_ | _]}}] = result
+    end
+
+    test "with a union attribute registers a discriminator and variant filter schema" do
+      attribute = Ash.Resource.Info.attribute(Post, :shape)
+
+      {result, _acc} = OpenApi.filter_type(attribute, Post, OpenApi.empty_acc())
+
+      assert [{"post-filter-shape", %OpenApiSpex.Schema{anyOf: paths}}] = result
+
+      assert Enum.any?(paths, fn
+               %OpenApiSpex.Schema{
+                 required: [:at_path],
+                 properties: %{
+                   at_path: %OpenApiSpex.Schema{enum: [["type"]]},
+                   eq: %OpenApiSpex.Schema{enum: ["circle", "label"]}
+                 }
+               } ->
+                 true
+
+               _ ->
+                 false
+             end)
+
+      assert Enum.any?(paths, fn
+               %OpenApiSpex.Schema{
+                 properties: %{
+                   at_path: %OpenApiSpex.Schema{enum: [["value", "radius"]]},
+                   eq: %OpenApiSpex.Schema{type: :integer}
+                 }
+               } ->
+                 true
+
+               _ ->
+                 false
+             end)
+    end
+
+    test "supports direct Ash.Type.Union attributes as well as NewTypes" do
+      attribute = Ash.Resource.Info.attribute(Post, :direct_shape)
+
+      {result, _acc} = OpenApi.filter_type(attribute, Post, OpenApi.empty_acc())
+
+      assert [{"post-filter-direct_shape", %OpenApiSpex.Schema{anyOf: paths}}] = result
+      assert Enum.any?(paths, &(&1.properties.at_path.enum == [["type"]]))
     end
 
     test "with attribute" do
@@ -229,7 +284,7 @@ defmodule AshJsonApi.OpenApiTest do
   end
 
   describe "raw_filter_type/2" do
-    test "with an embedded resource builds partial path filters and excludes unions" do
+    test "with an embedded resource builds partial filters for public fields and tagged unions" do
       attribute = Ash.Resource.Info.attribute(Post, :bio)
 
       {result, _acc} = OpenApi.raw_filter_type(attribute, Post, OpenApi.empty_acc())
@@ -255,9 +310,25 @@ defmodule AshJsonApi.OpenApiTest do
                  false
              end)
 
-      refute Enum.any?(paths, fn
+      assert Enum.any?(paths, fn
                %OpenApiSpex.Schema{
-                 properties: %{at_path: %OpenApiSpex.Schema{enum: [["shape" | _]]}}
+                 properties: %{
+                   at_path: %OpenApiSpex.Schema{enum: [["shape", "type"]]},
+                   eq: %OpenApiSpex.Schema{enum: ["circle", "label"]}
+                 }
+               } ->
+                 true
+
+               _ ->
+                 false
+             end)
+
+      assert Enum.any?(paths, fn
+               %OpenApiSpex.Schema{
+                 properties: %{
+                   at_path: %OpenApiSpex.Schema{enum: [["shape", "value", "radius"]]},
+                   eq: %OpenApiSpex.Schema{type: :integer}
+                 }
                } ->
                  true
 

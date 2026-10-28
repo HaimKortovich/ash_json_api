@@ -911,9 +911,15 @@ defmodule AshJsonApi.Request do
           true
 
         attribute ->
-          case embedded_resource_for_path(attribute.type, attribute.constraints) do
-            nil -> true
-            embedded -> valid_embedded_path?(embedded, path)
+          case union_for_filter_path(attribute.type, attribute.constraints) do
+            {Ash.Type.Union, constraints} ->
+              valid_union_path?(constraints, path)
+
+            _ ->
+              case embedded_resource_for_path(attribute.type, attribute.constraints) do
+                nil -> true
+                embedded -> valid_embedded_path?(embedded, path)
+              end
           end
       end
     else
@@ -932,9 +938,15 @@ defmodule AshJsonApi.Request do
         not union_or_array_type?(attribute.type, attribute.constraints)
 
       true ->
-        case embedded_resource_for_path(attribute.type, attribute.constraints) do
-          nil -> false
-          nested_resource -> valid_embedded_path?(nested_resource, rest)
+        case union_for_filter_path(attribute.type, attribute.constraints) do
+          {Ash.Type.Union, constraints} ->
+            valid_union_path?(constraints, rest)
+
+          _ ->
+            case embedded_resource_for_path(attribute.type, attribute.constraints) do
+              nil -> false
+              nested_resource -> valid_embedded_path?(nested_resource, rest)
+            end
         end
     end
   end
@@ -942,9 +954,24 @@ defmodule AshJsonApi.Request do
   defp valid_embedded_path?(_resource, _path), do: false
 
   defp public_attribute_for_filter(resource, name) do
+    attribute_for_filter(resource, name, true)
+  end
+
+  defp any_attribute_for_filter(resource, name) do
+    attribute_for_filter(resource, name, false)
+  end
+
+  defp attribute_for_filter(resource, name, public_only?) do
     name = to_string(name)
 
-    Ash.Resource.Info.public_attributes(resource)
+    attributes =
+      if public_only? do
+        Ash.Resource.Info.public_attributes(resource)
+      else
+        Ash.Resource.Info.attributes(resource)
+      end
+
+    attributes
     |> Enum.find(fn attribute ->
       json_name =
         if AshJsonApi.Resource in Spark.extensions(resource) do
@@ -985,6 +1012,68 @@ defmodule AshJsonApi.Request do
     {type, _constraints} = unwrap_filter_new_type(type, constraints)
     type == Ash.Type.Union or match?({:array, _}, type)
   end
+
+  defp union_for_filter_path(type, constraints) do
+    {type, constraints} = unwrap_filter_new_type(type, constraints)
+    {type, constraints}
+  end
+
+  defp valid_union_path?(constraints, ["type"]),
+    do: constraints[:storage] != :map_with_tag and constraints[:types] not in [nil, []]
+
+  defp valid_union_path?(constraints, [:type]),
+    do: constraints[:storage] != :map_with_tag and constraints[:types] not in [nil, []]
+
+  defp valid_union_path?(constraints, ["value"]) do
+    (constraints[:types] || [])
+    |> Enum.any?(fn {_name, config} ->
+      type = Ash.Type.get_type(config[:type])
+      not Ash.Resource.Info.resource?(type) and type != Ash.Type.Union
+    end)
+  end
+
+  defp valid_union_path?(constraints, [:value]), do: valid_union_path?(constraints, ["value"])
+
+  defp valid_union_path?(constraints, ["value", segment | rest]) do
+    matches =
+      (constraints[:types] || [])
+      |> Enum.flat_map(fn {_name, config} ->
+        case embedded_resource_for_path(config[:type], config[:constraints] || []) do
+          nil ->
+            []
+
+          variant ->
+            case any_attribute_for_filter(variant, segment) do
+              nil -> []
+              attribute -> [{attribute, variant}]
+            end
+        end
+      end)
+
+    signatures =
+      Enum.uniq(
+        Enum.map(matches, fn {attribute, _variant} ->
+          {attribute.type, attribute.constraints}
+        end)
+      )
+
+    matches != [] and length(signatures) == 1 and
+      Enum.all?(matches, fn {attribute, _variant} ->
+        attribute.public? and attribute.filterable? != false and
+          if rest == [] do
+            not union_or_array_type?(attribute.type, attribute.constraints)
+          else
+            case embedded_resource_for_path(attribute.type, attribute.constraints) do
+              nil -> false
+              nested -> valid_embedded_path?(nested, rest)
+            end
+          end
+      end)
+  end
+
+  defp valid_union_path?(_constraints, [_segment | _rest]), do: false
+
+  defp valid_union_path?(_constraints, _path), do: false
 
   defp parse_sort(%{query_params: %{"sort" => sort_string}, resource: resource} = request)
        when is_bitstring(sort_string) do
