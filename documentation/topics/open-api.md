@@ -185,6 +185,27 @@ use AshJsonApi.Router,
 
 ## Configuration
 
+### Filtering embedded attributes
+
+Generated filter schemas support partial filters on public, filterable fields inside single embedded resources. Use Ash's `at_path` predicate to select the embedded field, and combine conditions with the regular boolean filters:
+
+```elixir
+%{
+  "and" => [
+    %{"bio" => %{"at_path" => ["nationality"], "eq" => "KR"}},
+    %{"bio" => %{"at_path" => ["age"], "gte" => 25}}
+  ]
+}
+```
+
+For URL query parameters, encode each path as an indexed list, for example:
+
+```text
+?filter[and][0][bio][at_path][]=nationality&filter[and][0][bio][eq]=KR&filter[and][1][bio][at_path][]=age&filter[and][1][bio][gte]=25
+```
+
+Only public, filterable scalar fields and nested single embeds are included. Paths to private fields, arrays of embeds, and union variants are not supported by the generated filter schema; invalid embedded paths are rejected by JSON:API requests. This is partial-field filtering, not whole-embed equality.
+
 ### Filter Schema Type
 
 By default, the filter schema uses `deepObject` as its type, which works well with Swagger UI but is technically invalid per the OpenAPI spec (`deepObject` is only valid for the `style` property, not `type`). If you need a spec-compliant schema, you can disable this:

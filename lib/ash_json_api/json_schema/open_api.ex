@@ -3257,7 +3257,53 @@ if Code.ensure_loaded?(OpenApiSpex) do
       end
     end
 
+    def raw_filter_type(%Ash.Resource.Attribute{} = attribute, resource, acc) do
+      {type, constraints} = field_type(attribute, resource)
+      {type, constraints} = unwrap_new_type(type, constraints)
+      type = embedded_resource_type(type, constraints)
+
+      if embedded_resource?(type) do
+        paths = embedded_filter_paths(type, resource, [], MapSet.new())
+
+        {path_schemas, acc} =
+          Enum.reduce(paths, {[], acc}, fn {path, leaf}, {schemas, acc} ->
+            {schema, acc} = raw_filter_type(leaf, resource, acc)
+
+            if schema do
+              at_path = %Schema{
+                type: :array,
+                items: %Schema{type: :string},
+                enum: [Enum.map(path, &to_string/1)]
+              }
+
+              schema = %{
+                schema
+                | properties: Map.put(schema.properties || %{}, :at_path, at_path),
+                  required: [:at_path],
+                  additionalProperties: false
+              }
+
+              {[schema | schemas], acc}
+            else
+              {schemas, acc}
+            end
+          end)
+
+        case Enum.reverse(path_schemas) do
+          [] -> {nil, acc}
+          [schema] -> {schema, acc}
+          schemas -> {%Schema{anyOf: schemas}, acc}
+        end
+      else
+        raw_filter_type_non_embedded(attribute, resource, acc)
+      end
+    end
+
     def raw_filter_type(attribute_or_aggregate, resource, acc) do
+      raw_filter_type_non_embedded(attribute_or_aggregate, resource, acc)
+    end
+
+    defp raw_filter_type_non_embedded(attribute_or_aggregate, resource, acc) do
       {type, _constraints} = field_type(attribute_or_aggregate, resource)
       array_type? = match?({:array, _}, type)
 
@@ -3285,6 +3331,68 @@ if Code.ensure_loaded?(OpenApiSpex) do
          |> with_attribute_description(attribute_or_aggregate), acc}
       end
     end
+
+    defp embedded_filter_paths(type, resource, prefix, seen) do
+      type = unwrap_new_type(type)
+
+      if embedded_resource?(type) and not MapSet.member?(seen, type) do
+        seen = MapSet.put(seen, type)
+
+        type
+        |> Ash.Resource.Info.public_attributes()
+        |> Enum.filter(&(&1.filterable? != false))
+        |> Enum.flat_map(fn attribute ->
+          {attribute_type, constraints} = unwrap_new_type(attribute.type, attribute.constraints)
+          attribute_type = embedded_resource_type(attribute_type, constraints)
+          path = prefix ++ [attribute.name]
+
+          cond do
+            embedded_resource?(attribute_type) ->
+              embedded_filter_paths(attribute_type, resource, path, seen)
+
+            # Union traversal is intentionally excluded until Ash's path handling and
+            # variant semantics are characterized. Keep it out of the generated schema.
+            attribute_type == Ash.Type.Union ->
+              []
+
+            match?({:array, _}, attribute_type) ->
+              []
+
+            true ->
+              leaf = %{attribute | type: attribute_type, constraints: constraints}
+              [{path, leaf}]
+          end
+        end)
+      else
+        []
+      end
+    end
+
+    defp unwrap_new_type(type), do: type |> unwrap_new_type([]) |> elem(0)
+
+    defp unwrap_new_type(type, constraints) do
+      if Ash.Type.NewType.new_type?(type) do
+        unwrap_new_type(
+          Ash.Type.NewType.subtype_of(type),
+          Ash.Type.NewType.constraints(type, constraints)
+        )
+      else
+        {Ash.Type.get_type(type), constraints}
+      end
+    end
+
+    defp embedded_resource?(type) do
+      Ash.Resource.Info.resource?(type) and AshJsonApi.JsonSchema.embedded?(type)
+    end
+
+    defp embedded_resource_type(Ash.Type.Struct, constraints) do
+      case constraints[:instance_of] do
+        type when not is_nil(type) -> type
+        _ -> Ash.Type.Struct
+      end
+    end
+
+    defp embedded_resource_type(type, _constraints), do: type
 
     defp attribute_filter_field_type(resource, attribute) do
       AshJsonApi.Resource.Info.type(resource) <> "-filter-" <> to_string(attribute.name)
@@ -3579,7 +3687,13 @@ if Code.ensure_loaded?(OpenApiSpex) do
           resource
         )
       else
-        !AshJsonApi.JsonSchema.embedded?(type)
+        type = embedded_resource_type(type, attribute.constraints)
+
+        if embedded_resource?(type) do
+          embedded_filter_paths(type, resource, [], MapSet.new()) != []
+        else
+          !AshJsonApi.JsonSchema.embedded?(attribute.type)
+        end
       end
     end
 

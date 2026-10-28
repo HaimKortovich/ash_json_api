@@ -849,7 +849,11 @@ defmodule AshJsonApi.Request do
        when is_map(filter) do
     if request.action.type == :read && request.route.derive_filter? &&
          AshJsonApi.Resource.Info.derive_filter?(request.resource) do
-      %{request | filter: filter}
+      if valid_embedded_filter_paths?(request.resource, filter) do
+        %{request | filter: filter}
+      else
+        add_error(request, AshJsonApi.Error.InvalidFilter.exception([]), request.route.type)
+      end
     else
       %{request | arguments: Map.put(request.arguments, :filter, filter)}
     end
@@ -865,6 +869,122 @@ defmodule AshJsonApi.Request do
   end
 
   defp parse_filter(request), do: %{request | filter: %{}}
+
+  defp valid_embedded_filter_paths?(resource, filters) when is_map(filters) do
+    Enum.all?(filters, fn
+      {key, value} when key in ["and", "or", :and, :or] ->
+        value
+        |> indexed_filter_values()
+        |> Enum.all?(&valid_embedded_filter_paths?(resource, &1))
+
+      {key, value} when key in ["not", :not] ->
+        value
+        |> List.wrap()
+        |> Enum.all?(&valid_embedded_filter_paths?(resource, &1))
+
+      {key, value} when is_map(value) ->
+        valid_embedded_at_path?(resource, key, value)
+
+      _ ->
+        true
+    end)
+  end
+
+  defp valid_embedded_filter_paths?(_resource, _filters), do: true
+
+  defp indexed_filter_values(value) when is_list(value), do: value
+
+  defp indexed_filter_values(value) when is_map(value) do
+    value
+    |> Enum.sort_by(fn {key, _} -> to_string(key) end)
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  defp indexed_filter_values(_), do: []
+
+  defp valid_embedded_at_path?(resource, key, filter) do
+    path = Map.get(filter, "at_path") || Map.get(filter, :at_path)
+
+    if is_list(path) do
+      case public_attribute_for_filter(resource, key) do
+        nil ->
+          true
+
+        attribute ->
+          case embedded_resource_for_path(attribute.type, attribute.constraints) do
+            nil -> true
+            embedded -> valid_embedded_path?(embedded, path)
+          end
+      end
+    else
+      valid_embedded_filter_paths?(resource, filter)
+    end
+  end
+
+  defp valid_embedded_path?(resource, [segment | rest]) do
+    attribute = public_attribute_for_filter(resource, segment)
+
+    cond do
+      is_nil(attribute) or attribute.filterable? == false ->
+        false
+
+      rest == [] ->
+        not union_or_array_type?(attribute.type, attribute.constraints)
+
+      true ->
+        case embedded_resource_for_path(attribute.type, attribute.constraints) do
+          nil -> false
+          nested_resource -> valid_embedded_path?(nested_resource, rest)
+        end
+    end
+  end
+
+  defp valid_embedded_path?(_resource, _path), do: false
+
+  defp public_attribute_for_filter(resource, name) do
+    name = to_string(name)
+
+    Ash.Resource.Info.public_attributes(resource)
+    |> Enum.find(fn attribute ->
+      json_name =
+        if AshJsonApi.Resource in Spark.extensions(resource) do
+          AshJsonApi.Resource.Info.field_to_json_key(resource, attribute.name)
+        else
+          to_string(attribute.name)
+        end
+
+      json_name == name
+    end)
+  end
+
+  defp embedded_resource_for_path(type, constraints) do
+    {type, constraints} = unwrap_filter_new_type(type, constraints)
+
+    type =
+      if type == Ash.Type.Struct do
+        constraints[:instance_of]
+      else
+        type
+      end
+
+    if Ash.Resource.Info.resource?(type) && AshJsonApi.JsonSchema.embedded?(type), do: type
+  end
+
+  defp unwrap_filter_new_type(type, constraints) do
+    if Ash.Type.NewType.new_type?(type) do
+      unwrap_filter_new_type(
+        Ash.Type.NewType.subtype_of(type),
+        Ash.Type.NewType.constraints(type, constraints)
+      )
+    else
+      {type, constraints}
+    end
+  end
+
+  defp union_or_array_type?(type, constraints) do
+    {type, _constraints} = unwrap_filter_new_type(type, constraints)
+    type == Ash.Type.Union or match?({:array, _}, type)
+  end
 
   defp parse_sort(%{query_params: %{"sort" => sort_string}, resource: resource} = request)
        when is_bitstring(sort_string) do

@@ -11,6 +11,12 @@ See [Conventional Commits](Https://conventionalcommits.org) for commit guideline
 
 <!-- changelog -->
 
+## Unreleased
+
+### Improvements:
+
+* Generate OpenAPI filters for public fields inside embedded resources, and reject paths to private or unsupported embedded fields.
+
 ## [v1.6.6](https://github.com/ash-project/ash_json_api/compare/v1.6.5...v1.6.6) (2026-05-21)
 
 

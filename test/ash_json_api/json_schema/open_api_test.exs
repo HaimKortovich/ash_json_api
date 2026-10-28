@@ -8,6 +8,39 @@ defmodule AshJsonApi.OpenApiTest do
   alias AshJsonApi.OpenApi
   alias __MODULE__.{Blogs, Author, Post}
 
+  defmodule Circle do
+    use Ash.Resource, data_layer: :embedded
+
+    attributes do
+      attribute(:radius, :integer, public?: true)
+    end
+
+    actions do
+      defaults([:read, create: :*, update: :*])
+    end
+  end
+
+  defmodule Shape do
+    use Ash.Type.NewType,
+      subtype_of: :union,
+      constraints: [types: [circle: [type: Circle], label: [type: :string]]]
+  end
+
+  defmodule Bio do
+    use Ash.Resource, data_layer: :embedded
+
+    attributes do
+      attribute(:nationality, :string, public?: true)
+      attribute(:age, :integer, public?: true)
+      attribute(:private_note, :string)
+      attribute(:shape, Shape, public?: true)
+    end
+
+    actions do
+      defaults([:read, create: :*, update: :*])
+    end
+  end
+
   defmodule Author do
     use Ash.Resource,
       domain: Blogs,
@@ -55,6 +88,7 @@ defmodule AshJsonApi.OpenApiTest do
     attributes do
       uuid_primary_key(:id, writable?: true)
       attribute(:view_count, :integer, public?: true, description: "View count of the post")
+      attribute(:bio, Bio, public?: true)
     end
 
     relationships do
@@ -86,6 +120,14 @@ defmodule AshJsonApi.OpenApiTest do
   end
 
   describe "filter_type/2" do
+    test "with embedded resource attribute registers a path filter schema" do
+      attribute = Ash.Resource.Info.attribute(Post, :bio)
+
+      {result, _acc} = OpenApi.filter_type(attribute, Post, OpenApi.empty_acc())
+
+      assert [{"post-filter-bio", %OpenApiSpex.Schema{anyOf: [_ | _]}}] = result
+    end
+
     test "with attribute" do
       resource = Post
       attribute = Ash.Resource.Info.attribute(Post, :view_count)
@@ -187,6 +229,71 @@ defmodule AshJsonApi.OpenApiTest do
   end
 
   describe "raw_filter_type/2" do
+    test "with an embedded resource builds partial path filters and excludes unions" do
+      attribute = Ash.Resource.Info.attribute(Post, :bio)
+
+      {result, _acc} = OpenApi.raw_filter_type(attribute, Post, OpenApi.empty_acc())
+
+      assert %OpenApiSpex.Schema{anyOf: paths} = result
+
+      assert Enum.any?(paths, fn
+               %OpenApiSpex.Schema{
+                 properties: %{at_path: %OpenApiSpex.Schema{enum: [["nationality"]]}}
+               } = schema ->
+                 schema.properties.eq == %OpenApiSpex.Schema{type: :string}
+
+               _ ->
+                 false
+             end)
+
+      assert Enum.any?(paths, fn
+               %OpenApiSpex.Schema{properties: %{at_path: %OpenApiSpex.Schema{enum: [["age"]]}}} =
+                   schema ->
+                 schema.properties.greater_than_or_equal == %OpenApiSpex.Schema{type: :integer}
+
+               _ ->
+                 false
+             end)
+
+      refute Enum.any?(paths, fn
+               %OpenApiSpex.Schema{
+                 properties: %{at_path: %OpenApiSpex.Schema{enum: [["shape" | _]]}}
+               } ->
+                 true
+
+               _ ->
+                 false
+             end)
+
+      refute Enum.any?(paths, fn
+               %OpenApiSpex.Schema{
+                 properties: %{at_path: %OpenApiSpex.Schema{enum: [["private_note"]]}}
+               } ->
+                 true
+
+               _ ->
+                 false
+             end)
+    end
+
+    test "Ash can parse an explicit at_path into a union variant" do
+      query =
+        Ash.Query.filter_input(Post, %{
+          "bio" => %{"at_path" => ["shape", "radius"], "eq" => 10}
+        })
+
+      assert query.valid?
+    end
+
+    test "Ash currently accepts an explicit path to a private embedded attribute" do
+      query =
+        Ash.Query.filter_input(Post, %{
+          "bio" => %{"at_path" => ["private_note"], "eq" => "secret"}
+        })
+
+      assert query.valid?
+    end
+
     test "with attribute" do
       resource = Post
       attribute = Ash.Resource.Info.attribute(Post, :view_count)

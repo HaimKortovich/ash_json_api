@@ -8,6 +8,20 @@ defmodule AshJsonApiTest.FetchingData.Filtering do
 
   # credo:disable-for-this-file Credo.Check.Readability.MaxLineLength
 
+  defmodule Bio do
+    use Ash.Resource, data_layer: :embedded
+
+    attributes do
+      attribute(:nationality, :string, public?: true)
+      attribute(:age, :integer, public?: true)
+      attribute(:private_note, :string)
+    end
+
+    actions do
+      defaults([:read, create: :*, update: :*])
+    end
+  end
+
   defmodule Author do
     use Ash.Resource,
       domain: AshJsonApiTest.FetchingData.Filtering.Domain,
@@ -38,6 +52,7 @@ defmodule AshJsonApiTest.FetchingData.Filtering do
     attributes do
       uuid_primary_key(:id)
       attribute(:name, :string, public?: true)
+      attribute(:bio, Bio, public?: true)
     end
 
     relationships do
@@ -123,6 +138,16 @@ defmodule AshJsonApiTest.FetchingData.Filtering do
   # The filter query parameter is reserved for filtering data. Servers and clients SHOULD use this key for filtering operations.
   # --------------------------
   describe "filter query param" do
+    test "OpenAPI includes embedded path filters" do
+      schemas = AshJsonApi.OpenApi.schemas([Domain], AshJsonApi.OpenApi.empty_acc())
+
+      assert %OpenApiSpex.Reference{"$ref": "#/components/schemas/author-filter-bio"} =
+               schemas["author-filter"].properties.bio
+
+      assert %OpenApiSpex.Schema{anyOf: paths} = schemas["author-filter-bio"]
+      assert length(paths) == 2
+    end
+
     @describetag :spec_may
     test "key-value filter" do
       post =
@@ -140,6 +165,49 @@ defmodule AshJsonApiTest.FetchingData.Filtering do
         |> get("/posts?filter[name]=foo", status: 200)
         |> assert_valid_resource_objects("post", [post.id])
         |> assert_invalid_resource_objects("post", [post2.id])
+    end
+
+    test "filters on partial embedded paths" do
+      matching_author =
+        Author
+        |> Ash.Changeset.for_create(:create, %{
+          name: "matching",
+          bio: %{nationality: "KR", age: 30}
+        })
+        |> Ash.create!()
+
+      _non_matching_author =
+        Author
+        |> Ash.Changeset.for_create(:create, %{
+          name: "too young",
+          bio: %{nationality: "KR", age: 20}
+        })
+        |> Ash.create!()
+
+      _other_country_author =
+        Author
+        |> Ash.Changeset.for_create(:create, %{
+          name: "other country",
+          bio: %{nationality: "US", age: 30}
+        })
+        |> Ash.create!()
+
+      _conn =
+        Domain
+        |> get(
+          "/authors?filter[and][0][bio][at_path][]=nationality&filter[and][0][bio][eq]=KR&filter[and][1][bio][at_path][]=age&filter[and][1][bio][gte]=25",
+          status: 200
+        )
+        |> assert_valid_resource_objects("author", [matching_author.id])
+    end
+
+    test "rejects paths to private embedded attributes" do
+      _conn =
+        Domain
+        |> get(
+          "/authors?filter[bio][at_path][]=private_note&filter[bio][eq]=secret",
+          status: 400
+        )
     end
 
     test "equals/not_equals filter" do
