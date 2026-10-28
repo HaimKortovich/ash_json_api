@@ -469,6 +469,174 @@ defmodule AshJsonApi.JsonSchema do
     resource_attribute_type(Map.put(attr, :constraints, []))
   end
 
+  @doc """
+  Returns a schema and the reusable schemas generated while building it.
+
+  Tagged union variants are stored as component schemas, named using the same
+  convention as the OpenAPI generator. The returned schema references them by
+  `#/components/schemas/...` and omits OpenAPI's discriminator mapping.
+  """
+  def attribute_schema(%{type: _type} = attr, opts) when is_list(opts) do
+    state = %{resource: opts[:resource], schemas: opts[:schemas] || %{}}
+    attr = Map.put_new(attr, :constraints, [])
+    attr = Map.update!(attr, :constraints, &(&1 || []))
+    {schema, state} = resource_attribute_type(attr, state)
+    {schema, state.schemas}
+  end
+
+  @doc false
+  def union_variant_schema_name(attr, resource, variant_name) do
+    json_api_type = if resource, do: AshJsonApi.Resource.Info.type(resource)
+    attr_name = Map.get(attr, :name)
+
+    if json_api_type && attr_name do
+      "#{json_api_type}_#{attr_name}_#{variant_name}"
+    else
+      to_string(variant_name)
+    end
+  end
+
+  defp resource_attribute_type(%{type: {:array, type}} = attr, state) do
+    {items, state} =
+      resource_attribute_type(
+        %{attr | type: type, constraints: attr.constraints[:items] || []},
+        state
+      )
+
+    {%{"type" => "array", "items" => items}, state}
+  end
+
+  defp resource_attribute_type(%{type: Ash.Type.Union, constraints: constraints} = attr, state) do
+    types = constraints[:types] || []
+
+    tag_field =
+      Enum.find_value(types, fn {_name, config} ->
+        if config[:tag_value], do: config[:tag]
+      end)
+
+    {variants, state} =
+      Enum.reduce(types, {[], state}, fn {name, config}, {variants, state} ->
+        variant_attr = %{
+          attr
+          | type: Ash.Type.get_type(config[:type]),
+            constraints: config[:constraints] || []
+        }
+
+        {schema, state} = resource_attribute_type(variant_attr, state)
+
+        case {tag_field, config[:tag_value]} do
+          {tag, value} when not is_nil(tag) and not is_nil(value) ->
+            schema =
+              add_union_tag(schema, to_string(tag), to_string(value))
+
+            schema_name = union_variant_schema_name(attr, state.resource, name)
+            state = %{state | schemas: Map.put_new(state.schemas, schema_name, schema)}
+            {[%{"$ref" => "#/components/schemas/#{schema_name}"} | variants], state}
+
+          _ ->
+            {[schema | variants], state}
+        end
+      end)
+
+    variants = Enum.reverse(variants)
+
+    schema =
+      if tag_field do
+        %{"oneOf" => variants}
+      else
+        %{"anyOf" => variants}
+      end
+
+    {schema, state}
+  end
+
+  defp resource_attribute_type(%{type: Ash.Type.Struct, constraints: constraints} = attr, state) do
+    case constraints[:fields] do
+      fields when is_list(fields) and fields != [] ->
+        {properties, state} =
+          Enum.reduce(fields, {%{}, state}, fn {name, field_constraints}, {properties, state} ->
+            field = %{
+              type: Ash.Type.get_type(field_constraints[:type]),
+              constraints: field_constraints[:constraints] || []
+            }
+
+            {schema, state} = resource_attribute_type(field, state)
+            {Map.put(properties, to_string(name), schema), state}
+          end)
+
+        required =
+          fields
+          |> Enum.reject(fn {name, field_constraints} ->
+            field_constraints[:allow_nil?] != false or
+              has_default?(constraints[:instance_of], name, field_constraints)
+          end)
+          |> Enum.map(fn {name, _} -> to_string(name) end)
+
+        schema = %{"type" => "object", "properties" => properties}
+        schema = if required == [], do: schema, else: Map.put(schema, "required", required)
+        {schema, state}
+
+      _ ->
+        {resource_attribute_type(attr), state}
+    end
+  end
+
+  defp resource_attribute_type(%{type: type} = attr, state) do
+    cond do
+      Ash.Type.NewType.new_type?(type) ->
+        new_constraints = new_type_constraints(type, attr.constraints)
+        new_type = Ash.Type.NewType.subtype_of(type)
+
+        resource_attribute_type(
+          Map.merge(attr, %{type: new_type, constraints: new_constraints}),
+          state
+        )
+
+      embedded?(type) ->
+        {properties, state} = resource_attributes_with_components(type, state)
+
+        schema = %{
+          "type" => "object",
+          "properties" => properties,
+          "required" => required_attributes(type)
+        }
+
+        {add_null_for_non_required(schema), state}
+
+      true ->
+        {resource_attribute_type(attr), state}
+    end
+  end
+
+  defp resource_attributes_with_components(resource, state) do
+    attributes =
+      resource
+      |> Ash.Resource.Info.public_attributes()
+      |> Enum.reject(&AshJsonApi.Resource.only_primary_key?(resource, &1.name))
+
+    Enum.reduce(attributes, {%{}, state}, fn attr, {schemas, state} ->
+      {schema, state} =
+        resource_attribute_type(
+          %{type: attr.type, constraints: attr.constraints || [], name: attr.name},
+          state
+        )
+
+      {Map.put(schemas, AshJsonApi.Resource.Info.field_to_json_key(resource, attr.name), schema),
+       state}
+    end)
+  end
+
+  defp add_union_tag(schema, tag, value) do
+    properties =
+      schema
+      |> Map.get("properties", %{})
+      |> Map.put(tag, %{"type" => "string", "enum" => [value]})
+
+    schema
+    |> Map.put("properties", properties)
+    |> Map.update("required", [tag], &Enum.uniq(&1 ++ [tag]))
+  end
+
   defp resource_attribute_type(%{type: {:array, type}} = attr) do
     %{
       "type" => "array",

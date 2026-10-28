@@ -1469,14 +1469,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
     end
 
     defp union_variant_schema_name(attr, resource, variant_name) do
-      json_api_type = AshJsonApi.Resource.Info.type(resource)
-      attr_name = Map.get(attr, :name)
-
-      if json_api_type && attr_name do
-        "#{json_api_type}_#{attr_name}_#{variant_name}"
-      else
-        to_string(variant_name)
-      end
+      AshJsonApi.JsonSchema.union_variant_schema_name(attr, resource, variant_name)
     end
 
     defp add_tag_to_variant_schema(schema, tag_field_name, tag_value) do
@@ -2077,14 +2070,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
       route_params_to_add ++ Enum.sort_by(params, &(&1.in == :query))
     end
+
     @spec as_of_parameter(resource :: module) :: Parameter.t() | nil
     defp as_of_parameter(resource) do
       if temporal_resource?(resource) do
         %Parameter{
           name: :as_of,
           in: :query,
-          description:
-            "Read the resource as of an instant (time travel) for temporal resources",
+          description: "Read the resource as of an instant (time travel) for temporal resources",
           required: false,
           schema: %Schema{
             type: :string,

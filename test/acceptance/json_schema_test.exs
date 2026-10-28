@@ -415,6 +415,25 @@ defmodule Test.Acceptance.JsonSchemaTest do
       assert "value" in email_variant["required"]
     end
 
+    test "component-aware schema generation names and registers tagged variants" do
+      {schema, schemas} =
+        AshJsonApi.JsonSchema.attribute_schema(
+          %{type: TaggedPayload, name: :contact, constraints: []},
+          schemas: %{}
+        )
+
+      assert schema["oneOf"] == [
+               %{"$ref" => "#/components/schemas/email"},
+               %{"$ref" => "#/components/schemas/phone"}
+             ]
+
+      refute Map.has_key?(schema, "discriminator")
+      assert schemas["email"]["properties"]["type"]["enum"] == ["email"]
+      assert "type" in schemas["email"]["required"]
+      assert schemas["phone"]["properties"]["type"]["enum"] == ["phone"]
+      assert "type" in schemas["phone"]["required"]
+    end
+
     test "untagged union renders anyOf" do
       schema = AshJsonApi.JsonSchema.attribute_schema(%{type: UntaggedPayload, constraints: []})
 
