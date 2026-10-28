@@ -461,61 +461,23 @@ defmodule AshJsonApi.JsonSchema do
   `one_of`, `{:array, t}`, custom types implementing `json_schema/1`, embedded
   resources, `Ash.Type.NewType`, `Ash.Type.Enum` and any fallback.
   """
-  def attribute_schema(%{type: type, constraints: constraints} = attr) do
-    resource_attribute_type(%{attr | type: type, constraints: constraints})
+  def attribute_schema(%{type: _type, constraints: constraints} = attr) do
+    resource_attribute_type(Map.put(attr, :constraints, constraints || []))
   end
 
-  def attribute_schema(%{type: type} = attr) do
-    resource_attribute_type(%{attr | type: type, constraints: []})
-  end
-
-  defp resource_attribute_type(%{type: Ash.Type.String}) do
-    %{
-      "type" => "string"
-    }
-  end
-
-  defp resource_attribute_type(%{type: Ash.Type.Boolean}) do
-    %{
-      "type" => ["boolean", "string"],
-      "match" => "^(true|false)$"
-    }
-  end
-
-  defp resource_attribute_type(%{type: Ash.Type.Integer}) do
-    %{
-      "type" => ["integer", "string"],
-      "match" => "^[1-9][0-9]*$"
-    }
-  end
-
-  defp resource_attribute_type(%{type: Ash.Type.UtcDatetime}) do
-    %{
-      "type" => "string",
-      "format" => "date-time"
-    }
-  end
-
-  defp resource_attribute_type(%{type: Ash.Type.UUID}) do
-    %{
-      "type" => "string",
-      "format" => "uuid"
-    }
-  end
-
-  defp resource_attribute_type(%{type: Ash.Type.Atom, constraints: constraints}) do
-    if one_of = constraints[:one_of] do
-      %{"type" => "string", "enum" => Enum.map(one_of, &to_string/1)}
-    else
-      %{"type" => "string"}
-    end
+  def attribute_schema(%{type: _type} = attr) do
+    resource_attribute_type(Map.put(attr, :constraints, []))
   end
 
   defp resource_attribute_type(%{type: {:array, type}} = attr) do
     %{
       "type" => "array",
       "items" =>
-        resource_attribute_type(%{attr | type: type, constraints: attr.constraints[:items] || []})
+        resource_attribute_type(%{
+          attr
+          | type: type,
+            constraints: attr.constraints[:items] || []
+        })
     }
   end
 
@@ -609,6 +571,16 @@ defmodule AshJsonApi.JsonSchema do
   end
 
   defp resource_attribute_type(%{type: type} = attr) do
+    case AshJsonApi.JsonSchema.Primitive.schema(type, attr.constraints) do
+      {:ok, schema} ->
+        legacy_primitive_schema(type, schema)
+
+      :error ->
+        resource_attribute_type_non_primitive(attr)
+    end
+  end
+
+  defp resource_attribute_type_non_primitive(%{type: type} = attr) do
     constraints = attr.constraints
 
     cond do
@@ -636,6 +608,25 @@ defmodule AshJsonApi.JsonSchema do
         %{
           "type" => "any"
         }
+    end
+  end
+
+  defp legacy_primitive_schema(type, schema) do
+    case Ash.Type.get_type(type) do
+      Ash.Type.Boolean ->
+        Map.merge(schema, %{
+          "type" => ["boolean", "string"],
+          "match" => "^(true|false)$"
+        })
+
+      Ash.Type.Integer ->
+        Map.merge(schema, %{
+          "type" => ["integer", "string"],
+          "match" => "^[1-9][0-9]*$"
+        })
+
+      _ ->
+        schema
     end
   end
 

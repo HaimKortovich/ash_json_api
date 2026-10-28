@@ -911,26 +911,6 @@ if Code.ensure_loaded?(OpenApiSpex) do
       )
     end
 
-    defp resource_attribute_type(%{type: Ash.Type.String}, _resource, acc, _format) do
-      {%Schema{type: :string}, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.CiString}, _resource, acc, _format) do
-      {%Schema{type: :string}, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.Boolean}, _resource, acc, _format) do
-      {%Schema{type: :boolean}, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.Decimal}, _resource, acc, _format) do
-      {%Schema{type: :string}, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.Integer}, _resource, acc, _format) do
-      {%Schema{type: :integer}, acc}
-    end
-
     defp resource_attribute_type(
            %{type: Ash.Type.Map, constraints: constraints} = attr,
            resource,
@@ -969,77 +949,6 @@ if Code.ensure_loaded?(OpenApiSpex) do
       else
         {%Schema{type: :object}, acc}
       end
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.Float}, _resource, acc, _format) do
-      {%Schema{type: :number, format: :float}, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.Date}, _resource, acc, _format) do
-      {%Schema{
-         type: :string,
-         format: "date"
-       }, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.UtcDatetime}, _resource, acc, _format) do
-      {%Schema{
-         type: :string,
-         format: "date-time"
-       }, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.NaiveDatetime}, _resource, acc, _format) do
-      {%Schema{
-         type: :string,
-         format: "date-time"
-       }, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.Time}, _resource, acc, _format) do
-      {%Schema{
-         type: :string,
-         format: "time"
-       }, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.UUID}, _resource, acc, _format) do
-      {%Schema{
-         type: :string,
-         format: "uuid"
-       }, acc}
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.UUIDv7}, _resource, acc, _format) do
-      {%Schema{
-         type: :string,
-         format: "uuid"
-       }, acc}
-    end
-
-    defp resource_attribute_type(
-           %{type: Ash.Type.Atom, constraints: constraints},
-           _resource,
-           acc,
-           _format
-         ) do
-      if one_of = constraints[:one_of] do
-        {%Schema{
-           type: :string,
-           enum: Enum.map(one_of, &to_string/1)
-         }, acc}
-      else
-        {%Schema{
-           type: :string
-         }, acc}
-      end
-    end
-
-    defp resource_attribute_type(%{type: Ash.Type.DurationName}, _resource, acc, _format) do
-      {%Schema{
-         type: :string,
-         enum: Enum.map(Ash.Type.DurationName.values(), &to_string/1)
-       }, acc}
     end
 
     defp resource_attribute_type(%{type: Ash.Type.File}, _resource, acc, :json),
@@ -1246,6 +1155,16 @@ if Code.ensure_loaded?(OpenApiSpex) do
     end
 
     defp resource_attribute_type(%{type: type} = attr, resource, acc, format) do
+      case AshJsonApi.JsonSchema.Primitive.schema(type, attr.constraints) do
+        {:ok, schema} ->
+          {primitive_open_api_schema(schema), acc}
+
+        :error ->
+          resource_attribute_type_non_primitive(attr, resource, acc, format)
+      end
+    end
+
+    defp resource_attribute_type_non_primitive(%{type: type} = attr, resource, acc, format) do
       constraints = attr.constraints
 
       cond do
@@ -1285,6 +1204,28 @@ if Code.ensure_loaded?(OpenApiSpex) do
         true ->
           {%Schema{}, acc}
       end
+    end
+
+    defp primitive_open_api_schema(schema) do
+      type =
+        case schema["type"] do
+          "string" -> :string
+          "boolean" -> :boolean
+          "integer" -> :integer
+          "number" -> :number
+        end
+
+      format =
+        case schema["format"] do
+          "float" -> :float
+          other -> other
+        end
+
+      %Schema{
+        type: type,
+        format: format,
+        enum: schema["enum"]
+      }
     end
 
     defp nested_attributes_path(attr) do

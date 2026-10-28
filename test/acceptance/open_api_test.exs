@@ -349,6 +349,26 @@ defmodule Test.Acceptance.OpenApiTest do
     end
   end
 
+  defmodule FloatSample do
+    use Ash.Resource,
+      domain: Test.Acceptance.OpenApiTest.Blogs,
+      data_layer: Ash.DataLayer.Ets,
+      extensions: [AshJsonApi.Resource]
+
+    json_api do
+      type("float-sample")
+    end
+
+    actions do
+      defaults([:read])
+    end
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:amount, :float, public?: true, allow_nil?: false)
+    end
+  end
+
   defmodule Blogs do
     use Ash.Domain,
       otp_app: :ash_json_api,
@@ -366,6 +386,7 @@ defmodule Test.Acceptance.OpenApiTest do
       resource(Content)
       resource(Tag)
       resource(AuthorNoFilter)
+      resource(FloatSample)
     end
   end
 
@@ -403,6 +424,13 @@ defmodule Test.Acceptance.OpenApiTest do
   test "resources without a json_api are not included in the schema", %{open_api_spec: api_spec} do
     schema_keys = api_spec.components.schemas |> Map.keys()
     assert "tags" not in schema_keys
+  end
+
+  test "float attributes use the shared primitive schema mapping", %{open_api_spec: api_spec} do
+    schema = api_spec.components.schemas["float-sample"]
+
+    assert schema.properties.attributes.properties["amount"].type == :number
+    assert schema.properties.attributes.properties["amount"].format == :float
   end
 
   test "resource descriptions are used in the generated specification if provided", %{

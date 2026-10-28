@@ -391,9 +391,14 @@ defmodule Test.Acceptance.JsonSchemaTest do
         constraints: [
           types: [
             string: [type: :string],
-            integer: [type: :integer]
+            integer: [type: :integer],
+            float: [type: :float]
           ]
         ]
+    end
+
+    defmodule FloatType do
+      use Ash.Type.NewType, subtype_of: :float
     end
 
     test "discriminated union renders oneOf with tag enums" do
@@ -414,8 +419,40 @@ defmodule Test.Acceptance.JsonSchemaTest do
       schema = AshJsonApi.JsonSchema.attribute_schema(%{type: UntaggedPayload, constraints: []})
 
       assert Map.has_key?(schema, "anyOf")
-      assert length(schema["anyOf"]) == 2
+      assert length(schema["anyOf"]) == 3
+      assert %{"type" => "number", "format" => "float"} in schema["anyOf"]
       refute Map.has_key?(schema, "discriminator")
+    end
+
+    test "float aliases and NewTypes render as JSON Schema numbers" do
+      assert AshJsonApi.JsonSchema.attribute_schema(%{type: :float}) == %{
+               "type" => "number",
+               "format" => "float"
+             }
+
+      assert AshJsonApi.JsonSchema.attribute_schema(%{type: FloatType}) == %{
+               "type" => "number",
+               "format" => "float"
+             }
+    end
+
+    test "arrays of float aliases render numeric items" do
+      assert AshJsonApi.JsonSchema.attribute_schema(%{type: {:array, :float}}) == %{
+               "type" => "array",
+               "items" => %{"type" => "number", "format" => "float"}
+             }
+    end
+
+    test "legacy boolean and integer schemas continue accepting strings" do
+      assert AshJsonApi.JsonSchema.attribute_schema(%{type: Ash.Type.Boolean}) == %{
+               "type" => ["boolean", "string"],
+               "match" => "^(true|false)$"
+             }
+
+      assert AshJsonApi.JsonSchema.attribute_schema(%{type: Ash.Type.Integer}) == %{
+               "type" => ["integer", "string"],
+               "match" => "^[1-9][0-9]*$"
+             }
     end
   end
 
@@ -428,6 +465,7 @@ defmodule Test.Acceptance.JsonSchemaTest do
         field(:source, :atom, allow_nil?: false, default: :api)
         field(:count, :integer, allow_nil?: false, default: fn -> 0 end)
         field(:note, :string)
+        field(:ratio, :float)
       end
     end
 
@@ -440,6 +478,7 @@ defmodule Test.Acceptance.JsonSchemaTest do
       assert "source" in Map.keys(schema["properties"])
       assert "count" in Map.keys(schema["properties"])
       assert "note" in Map.keys(schema["properties"])
+      assert schema["properties"]["ratio"] == %{"type" => "number", "format" => "float"}
       refute "note" in schema["required"]
     end
 
