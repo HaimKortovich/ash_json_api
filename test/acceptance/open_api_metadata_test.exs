@@ -17,6 +17,7 @@ defmodule Test.Acceptance.OpenApiMetadataTest do
       routes do
         base "/metadata-items"
         get :read
+        post :create
         index :read
 
         index :offset do
@@ -45,10 +46,11 @@ defmodule Test.Acceptance.OpenApiMetadataTest do
     attributes do
       uuid_primary_key(:id)
       attribute(:name, :string, public?: true)
+      attribute(:captured_at, :utc_datetime_usec, public?: true)
     end
 
     actions do
-      defaults([:read, create: [:name]])
+      defaults([:read, create: [:name, :captured_at]])
 
       read :offset do
         pagination(offset?: true, countable: true, required?: false)
@@ -156,6 +158,42 @@ defmodule Test.Acceptance.OpenApiMetadataTest do
     assert Enum.any?(deep, &(&1["name"] == "page"))
     assert Enum.any?(deep, &(&1["name"] == "fields"))
     assert Enum.all?(deep, &(&1["explode"] == true))
+  end
+
+  test "known write timestamps and resource tags are typed; no includes means no included items",
+       ctx do
+    input =
+      get_in(ctx.document, [
+        "paths",
+        "/metadata-items",
+        "post",
+        "requestBody",
+        "content",
+        "application/vnd.api+json",
+        "schema"
+      ])
+
+    tag = input["properties"]["data"]["properties"]["type"]
+    assert tag["type"] == "string"
+    assert tag["enum"] == ["metadata_item"]
+
+    timestamp =
+      input["properties"]["data"]["properties"]["attributes"]["properties"]["captured_at"]
+
+    assert timestamp["type"] == ["string", "null"]
+    assert timestamp["format"] == "date-time"
+    validator = JsonXema.new(timestamp)
+    assert :ok = JsonXema.validate(validator, "2026-11-09T12:00:00.123456Z")
+    assert :ok = JsonXema.validate(validator, nil)
+    assert {:error, _} = JsonXema.validate(validator, 123)
+    assert schema(ctx.document, "/metadata-items")["properties"]["included"]["items"] == false
+
+    assert {:error, _} =
+             validate(
+               ctx.document,
+               "/metadata-items",
+               Map.put(response("/metadata-items"), "included", [%{}])
+             )
   end
 
   test "default error response describes the actual JSON:API envelope", ctx do

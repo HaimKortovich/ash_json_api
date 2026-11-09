@@ -894,7 +894,20 @@ if Code.ensure_loaded?(OpenApiSpex) do
             embedded_type_input(attr, resource, action_type, acc)
 
           :erlang.function_exported(type, :json_write_schema, 1) ->
-            {type.json_write_schema(attr.constraints), acc}
+            schema = type.json_write_schema(attr.constraints)
+            # Only replace the empty built-in fallback. Preserve every assertion
+            # in a real write schema, including string patterns and length bounds.
+            if schema in [%{}, %Schema{}] and
+                 match?({:ok, _}, AshJsonApi.JsonSchema.Primitive.schema(type, attr.constraints)) do
+              resource_attribute_type(attr, resource, acc, format)
+            else
+              {schema, acc}
+            end
+
+          match?({:ok, _}, AshJsonApi.JsonSchema.Primitive.schema(type, attr.constraints)) ->
+            # Built-in datetime aliases are NewTypes of a generic struct. Keep
+            # their specific wire type before unwrapping that implementation.
+            resource_attribute_type(attr, resource, acc, format)
 
           Ash.Type.NewType.new_type?(type) ->
             new_constraints = new_type_constraints(type, attr.constraints)
@@ -2585,6 +2598,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
             additionalProperties: false,
             properties: %{
               type: %Schema{
+                type: :string,
                 enum: [AshJsonApi.Resource.Info.type(resource)]
               },
               attributes:
@@ -2653,6 +2667,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 type: :string
               },
               type: %Schema{
+                type: :string,
                 enum: [AshJsonApi.Resource.Info.type(resource)]
               },
               attributes:
@@ -2950,7 +2965,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
               type: :object,
               additionalProperties: false,
               properties: %{
-                success: %Schema{enum: [true]}
+                success: %Schema{type: :boolean, enum: [true]}
               },
               required: [:success]
             }
@@ -3102,6 +3117,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
                   type: :string
                 },
                 type: %Schema{
+                  type: :string,
                   enum: [AshJsonApi.Resource.Info.type(relationship.destination)]
                 },
                 meta: %Schema{
@@ -3128,7 +3144,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
       items =
         if include_schemas == [] do
-          %Schema{}
+          false
         else
           %Schema{oneOf: include_schemas}
         end

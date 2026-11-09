@@ -608,7 +608,7 @@ defmodule Test.Acceptance.OpenApiTest do
     assert generic_action_schema.responses[201].content["application/vnd.api+json"].schema ==
              %Schema{
                type: :object,
-               properties: %{success: %Schema{enum: [true]}},
+               properties: %{success: %Schema{type: :boolean, enum: [true]}},
                required: [:success],
                additionalProperties: false
              }
