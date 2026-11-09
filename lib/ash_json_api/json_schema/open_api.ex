@@ -145,18 +145,38 @@ if Code.ensure_loaded?(OpenApiSpex) do
       # Union the complete schema with null. Merely adding "null" to type
       # leaves enum/$ref assertions rejecting it; an empty branch would instead
       # discard all validation for non-null union/reference values.
-      annotations =
-        schema
-        |> Map.take(~w(title description default examples deprecated readOnly writeOnly format))
-        |> Map.merge(
-          Map.filter(schema, fn {key, _} -> is_binary(key) and String.starts_with?(key, "x-") end)
-        )
-        |> normalize_openapi_31_map_values()
+      schema = Map.delete(schema, "nullable")
 
-      Map.put(annotations, "anyOf", [
-        schema |> Map.delete("nullable") |> normalize_openapi_31_map_values(),
-        %{"type" => "null"}
-      ])
+      if is_binary(schema["type"]) and
+           not Enum.any?(
+             ~w($ref anyOf oneOf allOf not const if then else),
+             &Map.has_key?(schema, &1)
+           ) do
+        # Type-specific assertions ignore null. Enums do not, so include it.
+        schema = Map.put(schema, "type", Enum.uniq([schema["type"], "null"]))
+
+        schema =
+          if is_list(schema["enum"]),
+            do: Map.update!(schema, "enum", &Enum.uniq(&1 ++ [nil])),
+            else: schema
+
+        normalize_openapi_31_map_values(schema)
+      else
+        annotations =
+          schema
+          |> Map.take(~w(title description default examples deprecated readOnly writeOnly))
+          |> Map.merge(
+            Map.filter(schema, fn {key, _} ->
+              is_binary(key) and String.starts_with?(key, "x-")
+            end)
+          )
+          |> normalize_openapi_31_map_values()
+
+        Map.put(annotations, "anyOf", [
+          normalize_openapi_31_map_values(schema),
+          %{"type" => "null"}
+        ])
+      end
     end
 
     defp normalize_openapi_31_value(%{"nullable" => false} = schema),
