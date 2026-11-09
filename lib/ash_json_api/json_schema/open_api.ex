@@ -142,33 +142,25 @@ if Code.ensure_loaded?(OpenApiSpex) do
     end
 
     defp normalize_openapi_31_value(%{"nullable" => true} = schema) do
-      schema = Map.delete(schema, "nullable")
+      # Union the complete schema with null. Merely adding "null" to type
+      # leaves enum/$ref assertions rejecting it; an empty branch would instead
+      # discard all validation for non-null union/reference values.
+      annotations =
+        schema
+        |> Map.take(~w(title description default examples deprecated readOnly writeOnly format))
+        |> Map.merge(
+          Map.filter(schema, fn {key, _} -> is_binary(key) and String.starts_with?(key, "x-") end)
+        )
+        |> normalize_openapi_31_map_values()
 
-      case Map.get(schema, "type") do
-        type when is_binary(type) ->
-          schema
-          |> Map.put("type", [type, "null"])
-          |> normalize_openapi_31_map_values()
-
-        types when is_list(types) ->
-          schema
-          |> Map.put("type", Enum.uniq(types ++ ["null"]))
-          |> normalize_openapi_31_map_values()
-
-        _ ->
-          case Map.get(schema, "anyOf") do
-            any_of when is_list(any_of) ->
-              schema
-              |> Map.put("anyOf", any_of ++ [%{"type" => "null"}])
-              |> normalize_openapi_31_map_values()
-
-            _ ->
-              schema
-              |> Map.put("anyOf", [%{}, %{"type" => "null"}])
-              |> normalize_openapi_31_map_values()
-          end
-      end
+      Map.put(annotations, "anyOf", [
+        schema |> Map.delete("nullable") |> normalize_openapi_31_map_values(),
+        %{"type" => "null"}
+      ])
     end
+
+    defp normalize_openapi_31_value(%{"nullable" => false} = schema),
+      do: schema |> Map.delete("nullable") |> normalize_openapi_31_map_values()
 
     defp normalize_openapi_31_value(value) when is_map(value),
       do: normalize_openapi_31_map_values(value)
@@ -1851,7 +1843,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
       operation = %Operation{
         description: action_description(action, route, resource),
-        operationId: route.name,
+        operationId: operation_id(route, resource),
         tags: [to_string(AshJsonApi.Resource.Info.type(resource))],
         parameters: parameters_list,
         responses: %{
@@ -1864,6 +1856,23 @@ if Code.ensure_loaded?(OpenApiSpex) do
       }
 
       {operation, acc_with_request_schemas}
+    end
+
+    defp operation_id(%{name: name}, _resource) when not is_nil(name), do: name
+
+    defp operation_id(route, resource) do
+      # Unnamed routes still need a stable identity for checked consumers and
+      # client generators. Do not include the deployment/domain URL prefix.
+      identity = "#{route.method}:#{AshJsonApi.Resource.Info.type(resource)}:#{route.route}"
+
+      suffix =
+        identity
+        |> then(&:crypto.hash(:sha256, &1))
+        |> Base.encode16(case: :lower)
+        |> binary_part(0, 12)
+
+      path = route.route |> String.replace(~r/[^A-Za-z0-9]+/, "_") |> String.trim("_")
+      "#{route.method}_#{AshJsonApi.Resource.Info.type(resource)}_#{path}_#{suffix}"
     end
 
     defp action_description(action, route, resource) do

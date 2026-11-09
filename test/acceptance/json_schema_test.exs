@@ -422,16 +422,36 @@ defmodule Test.Acceptance.JsonSchemaTest do
           schemas: %{}
         )
 
-      assert schema["oneOf"] == [
-               %{"$ref" => "#/components/schemas/email"},
-               %{"$ref" => "#/components/schemas/phone"}
-             ]
+      [
+        %{"$ref" => "#/components/schemas/" <> email},
+        %{"$ref" => "#/components/schemas/" <> phone}
+      ] = schema["oneOf"]
+
+      assert String.starts_with?(email, "union_")
+      refute email == phone
 
       refute Map.has_key?(schema, "discriminator")
-      assert schemas["email"]["properties"]["type"]["enum"] == ["email"]
-      assert "type" in schemas["email"]["required"]
-      assert schemas["phone"]["properties"]["type"]["enum"] == ["phone"]
-      assert "type" in schemas["phone"]["required"]
+      assert schemas[email]["properties"]["type"]["enum"] == ["email"]
+      assert "type" in schemas[email]["required"]
+      assert schemas[phone]["properties"]["type"]["enum"] == ["phone"]
+      assert "type" in schemas[phone]["required"]
+    end
+
+    test "independent unnamespaced unions cannot alias the same variant tag" do
+      first = %{
+        type: Ash.Type.Union,
+        constraints: [types: [other: [type: :map, tag: :status, tag_value: "other"]]]
+      }
+
+      second = %{
+        type: Ash.Type.Union,
+        constraints: [types: [other: [type: :map, tag: :brand, tag_value: "other"]]]
+      }
+
+      first_name = AshJsonApi.JsonSchema.union_variant_schema_name(first, nil, :other)
+      second_name = AshJsonApi.JsonSchema.union_variant_schema_name(second, nil, :other)
+      refute first_name == second_name
+      assert first_name == AshJsonApi.JsonSchema.union_variant_schema_name(first, nil, :other)
     end
 
     test "untagged union renders anyOf" do

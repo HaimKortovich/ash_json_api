@@ -14,6 +14,7 @@ defmodule AshJsonApi.JsonSchema.Primitive do
     :decimal,
     :date,
     :utc_datetime,
+    :utc_datetime_usec,
     :naive_datetime,
     :time,
     :uuid,
@@ -37,6 +38,7 @@ defmodule AshJsonApi.JsonSchema.Primitive do
       Ash.Type.Decimal -> {:ok, %{"type" => "string"}}
       Ash.Type.Date -> {:ok, %{"type" => "string", "format" => "date"}}
       Ash.Type.UtcDatetime -> {:ok, %{"type" => "string", "format" => "date-time"}}
+      Ash.Type.UtcDatetimeUsec -> {:ok, %{"type" => "string", "format" => "date-time"}}
       Ash.Type.NaiveDatetime -> {:ok, %{"type" => "string", "format" => "date-time"}}
       Ash.Type.Time -> {:ok, %{"type" => "string", "format" => "time"}}
       Ash.Type.UUID -> {:ok, %{"type" => "string", "format" => "uuid"}}

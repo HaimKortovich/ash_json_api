@@ -421,6 +421,36 @@ defmodule Test.Acceptance.OpenApiTest do
     assert api_spec.info.title == "foobar"
   end
 
+  test "3.1 nullable normalization preserves enum and union validation" do
+    for schema <- [
+          %{"type" => "string", "enum" => ["approved"], "nullable" => true},
+          %{"oneOf" => [%{"type" => "string", "enum" => ["approved"]}], "nullable" => true}
+        ] do
+      normalized =
+        AshJsonApi.OpenApi.to_map(%{"components" => %{"schemas" => %{"result" => schema}}})
+
+      value = normalized["components"]["schemas"]["result"]
+      validator = JsonXema.new(value)
+      assert :ok = JsonXema.validate(validator, nil)
+      assert :ok = JsonXema.validate(validator, "approved")
+      assert {:error, _} = JsonXema.validate(validator, "not-approved")
+      assert {:error, _} = JsonXema.validate(validator, 1)
+    end
+
+    normalized =
+      AshJsonApi.OpenApi.to_map(%{
+        "components" => %{
+          "schemas" => %{
+            "result" => %{"$ref" => "#/components/schemas/State", "nullable" => true}
+          }
+        }
+      })
+
+    assert normalized["components"]["schemas"]["result"] == %{
+             "anyOf" => [%{"$ref" => "#/components/schemas/State"}, %{"type" => "null"}]
+           }
+  end
+
   test "resources without a json_api are not included in the schema", %{open_api_spec: api_spec} do
     schema_keys = api_spec.components.schemas |> Map.keys()
     assert "tags" not in schema_keys
@@ -448,7 +478,14 @@ defmodule Test.Acceptance.OpenApiTest do
   test "API routes are mapped to OpenAPI Operations", %{open_api_spec: %OpenApi{} = api_spec} do
     assert map_size(api_spec.paths) == 16
 
-    assert %{"/authors" => _, "/authors/{id}" => _, "/posts" => _, "/posts/{id}" => _, "/contents" => _, "/contents/{id}" => _} =
+    assert %{
+             "/authors" => _,
+             "/authors/{id}" => _,
+             "/posts" => _,
+             "/posts/{id}" => _,
+             "/contents" => _,
+             "/contents/{id}" => _
+           } =
              api_spec.paths
 
     assert %Operation{} = api_spec.paths["/authors"].get
@@ -609,11 +646,22 @@ defmodule Test.Acceptance.OpenApiTest do
            ]
   end
 
-  test "API routes use `name` as operationId", %{
+  test "API routes preserve explicit names and generate stable IDs for unnamed routes", %{
     open_api_spec: %OpenApi{} = api_spec
   } do
     assert %Operation{operationId: "listAuthors"} = api_spec.paths["/authors"].get
-    assert %Operation{operationId: nil} = api_spec.paths["/authors/{id}"].get
+    assert %Operation{operationId: id} = api_spec.paths["/authors/{id}"].get
+    assert String.starts_with?(id, "get_author_authors_id_")
+    prefixed = AshJsonApi.OpenApi.spec(domains: [Blogs], prefix: "/api/v99")
+    assert prefixed.paths["/api/v99/authors/{id}"].get.operationId == id
+
+    ids =
+      for {_path, item} <- api_spec.paths,
+          {_method, %Operation{operationId: id}} <- Map.from_struct(item),
+          do: id
+
+    assert Enum.all?(ids, &(is_binary(&1) and byte_size(&1) > 0))
+    assert Enum.uniq(ids) == ids
   end
 
   test "API routes use `name` in default descriptions", %{
@@ -650,14 +698,16 @@ defmodule Test.Acceptance.OpenApiTest do
                type: :object,
                description: "Filters the query to results matching the given filter object",
                properties: %{
-                author: %Reference{"$ref": "#/components/schemas/author-filter"},
-                author_id: %Reference{"$ref": "#/components/schemas/post-filter-author_id"},
-                count_of_tags: %Reference{"$ref": "#/components/schemas/post-filter-count_of_tags"},
-                email: %Reference{"$ref": "#/components/schemas/post-filter-email"},
-                hidden: %Reference{"$ref": "#/components/schemas/post-filter-hidden"},
-                id: %Reference{"$ref": "#/components/schemas/post-filter-id"},
-                name: %Reference{"$ref": "#/components/schemas/post-filter-name"},
-                tags: %Reference{"$ref": "#/components/schemas/tag-filter"},
+                 author: %Reference{"$ref": "#/components/schemas/author-filter"},
+                 author_id: %Reference{"$ref": "#/components/schemas/post-filter-author_id"},
+                 count_of_tags: %Reference{
+                   "$ref": "#/components/schemas/post-filter-count_of_tags"
+                 },
+                 email: %Reference{"$ref": "#/components/schemas/post-filter-email"},
+                 hidden: %Reference{"$ref": "#/components/schemas/post-filter-hidden"},
+                 id: %Reference{"$ref": "#/components/schemas/post-filter-id"},
+                 name: %Reference{"$ref": "#/components/schemas/post-filter-name"},
+                 tags: %Reference{"$ref": "#/components/schemas/tag-filter"},
                  and: %Schema{
                    type: :array,
                    items: %Reference{
@@ -842,75 +892,74 @@ defmodule Test.Acceptance.OpenApiTest do
                    attributes: %Schema{
                      required: [],
                      type: :object,
-                      properties: %{
-                        "name" => %Schema{
-                          type: :string,
-                          nullable: true,
-                          description: "The name of the author. Field included by default."
-                        },
-                        "bio" => %Schema{
-                          required: [],
-                          type: :object,
-                          properties: %{
-                            "history" => %Schema{
-                              type: :string,
-                              nullable: true,
-                              description:
-                                "The history of the author. Field included by default."
-                            }
-                          },
-                          nullable: true,
-                          additionalProperties: false,
-                          description: "The bio of the author. Field included by default."
-                        }
-                      },
+                     properties: %{
+                       "name" => %Schema{
+                         type: :string,
+                         nullable: true,
+                         description: "The name of the author. Field included by default."
+                       },
+                       "bio" => %Schema{
+                         required: [],
+                         type: :object,
+                         properties: %{
+                           "history" => %Schema{
+                             type: :string,
+                             nullable: true,
+                             description: "The history of the author. Field included by default."
+                           }
+                         },
+                         nullable: true,
+                         additionalProperties: false,
+                         description: "The bio of the author. Field included by default."
+                       }
+                     },
                      additionalProperties: false,
                      description: "An attributes object for a author"
                    },
                    id: %{type: :string},
                    type: %Schema{type: :string},
-                  relationships: %Schema{
-                      type: :object,
-                      properties: %{
-                        posts: %Schema{
-                          properties: %{
-                            data: %Schema{
-                              uniqueItems: true,
-                              type: :array,
-                              items: %{
-                                type: :object,
-                                description: "Resource identifiers for posts",
-                                required: [:type, :id],
-                                properties: %{
-                                  id: %Schema{type: :string},
-                                  meta: %Schema{
-                                    type: :object,
-                                    additionalProperties: true
-                                  },
-                                  type: %Schema{type: :string}
-                                },
-                                additionalProperties: false
-                              },
-                              description: "Relationship data for posts"
-                            }
-                          }
-                        }
-                      },
-                      additionalProperties: false,
-                      description: "A relationships object for a author"
-                    },
-                    links: %Schema{
-                      type: :object,
-                      additionalProperties: true
-                    },
-                    meta: %Schema{
-                      type: :object,
-                      additionalProperties: true
-                    }
-                  },
-                  additionalProperties: false,
-                  description: "This is an author!"
-                }
+                   relationships: %Schema{
+                     type: :object,
+                     properties: %{
+                       posts: %Schema{
+                         properties: %{
+                           data: %Schema{
+                             uniqueItems: true,
+                             type: :array,
+                             items: %{
+                               type: :object,
+                               description: "Resource identifiers for posts",
+                               required: [:type, :id],
+                               properties: %{
+                                 id: %Schema{type: :string},
+                                 meta: %Schema{
+                                   type: :object,
+                                   additionalProperties: true
+                                 },
+                                 type: %Schema{type: :string}
+                               },
+                               additionalProperties: false
+                             },
+                             description: "Relationship data for posts"
+                           }
+                         }
+                       }
+                     },
+                     additionalProperties: false,
+                     description: "A relationships object for a author"
+                   },
+                   links: %Schema{
+                     type: :object,
+                     additionalProperties: true
+                   },
+                   meta: %Schema{
+                     type: :object,
+                     additionalProperties: true
+                   }
+                 },
+                 additionalProperties: false,
+                 description: "This is an author!"
+               }
     end
 
     test "Response body schema", %{open_api_spec: %OpenApi{} = api_spec} do
@@ -929,37 +978,36 @@ defmodule Test.Acceptance.OpenApiTest do
                  attributes: %Schema{
                    required: ["name", "author_id"],
                    type: :object,
-                    properties: %{
-                      "hidden" => %Schema{
-                        type: :string,
-                        nullable: true,
-                        description:
-                          "description of attribute :hidden. Field included by default."
-                      },
-                      "name" => %Schema{
-                        type: :string,
-                        description: "description of attribute :name. Field included by default."
-                      },
-                      "name_twice" => %Schema{
-                        type: :string,
-                        nullable: true,
-                        description: "Field included by default."
-                      },
-                      "author_id" => %Schema{
-                        type: :string,
-                        description: "Field included by default.",
-                        format: "uuid"
-                      },
-                      "email" => %Schema{
-                        type: :string,
-                        nullable: true,
-                        description: "Field included by default."
-                      },
-                      "count_of_tags" => %Schema{
-                        type: :integer,
-                        nullable: true
-                      }
-                    },
+                   properties: %{
+                     "hidden" => %Schema{
+                       type: :string,
+                       nullable: true,
+                       description: "description of attribute :hidden. Field included by default."
+                     },
+                     "name" => %Schema{
+                       type: :string,
+                       description: "description of attribute :name. Field included by default."
+                     },
+                     "name_twice" => %Schema{
+                       type: :string,
+                       nullable: true,
+                       description: "Field included by default."
+                     },
+                     "author_id" => %Schema{
+                       type: :string,
+                       description: "Field included by default.",
+                       format: "uuid"
+                     },
+                     "email" => %Schema{
+                       type: :string,
+                       nullable: true,
+                       description: "Field included by default."
+                     },
+                     "count_of_tags" => %Schema{
+                       type: :integer,
+                       nullable: true
+                     }
+                   },
                    additionalProperties: false,
                    description: "An attributes object for a post"
                  },
@@ -968,64 +1016,64 @@ defmodule Test.Acceptance.OpenApiTest do
                  relationships: %Schema{
                    type: :object,
                    properties: %{
-                      author: %Schema{
-                        properties: %{
-                          data: %Schema{
-                            required: [:type, :id],
-                            type: :object,
-                            properties: %{
-                              id: %Schema{type: :string},
-                              meta: %Schema{
-                                type: :object,
-                                additionalProperties: true
-                              },
-                              type: %Schema{type: :string}
-                            },
-                            additionalProperties: false,
-                            description: "An identifier for author",
-                            nullable: true
-                          }
-                        }
-                      },
-                      tags: %Schema{
-                        properties: %{
-                          data: %Schema{
-                            uniqueItems: true,
-                            type: :array,
-                            items: %{
-                              type: :object,
-                              description: "Resource identifiers for tags",
-                              required: [:type, :id],
-                              properties: %{
-                                id: %Schema{type: :string},
-                                meta: %Schema{
-                                  type: :object,
-                                  additionalProperties: true
-                                },
-                                type: %Schema{type: :string}
-                              },
-                              additionalProperties: false
-                            },
-                            description: "Relationship data for tags"
-                          }
-                        }
-                      }
-                    },
-                    additionalProperties: false,
-                    description: "A relationships object for a post"
-                  },
-                  links: %Schema{
-                    type: :object,
-                    additionalProperties: true
-                  },
-                  meta: %Schema{
-                    type: :object,
-                    additionalProperties: true
-                  }
-                },
-                additionalProperties: false,
-                description: "A \"Resource object\" representing a post"
-              }
+                     author: %Schema{
+                       properties: %{
+                         data: %Schema{
+                           required: [:type, :id],
+                           type: :object,
+                           properties: %{
+                             id: %Schema{type: :string},
+                             meta: %Schema{
+                               type: :object,
+                               additionalProperties: true
+                             },
+                             type: %Schema{type: :string}
+                           },
+                           additionalProperties: false,
+                           description: "An identifier for author",
+                           nullable: true
+                         }
+                       }
+                     },
+                     tags: %Schema{
+                       properties: %{
+                         data: %Schema{
+                           uniqueItems: true,
+                           type: :array,
+                           items: %{
+                             type: :object,
+                             description: "Resource identifiers for tags",
+                             required: [:type, :id],
+                             properties: %{
+                               id: %Schema{type: :string},
+                               meta: %Schema{
+                                 type: :object,
+                                 additionalProperties: true
+                               },
+                               type: %Schema{type: :string}
+                             },
+                             additionalProperties: false
+                           },
+                           description: "Relationship data for tags"
+                         }
+                       }
+                     }
+                   },
+                   additionalProperties: false,
+                   description: "A relationships object for a post"
+                 },
+                 links: %Schema{
+                   type: :object,
+                   additionalProperties: true
+                 },
+                 meta: %Schema{
+                   type: :object,
+                   additionalProperties: true
+                 }
+               },
+               additionalProperties: false,
+               description: "A \"Resource object\" representing a post"
+             }
     end
   end
 
@@ -1077,6 +1125,7 @@ defmodule Test.Acceptance.OpenApiTest do
       schema = response.content["application/vnd.api+json"].schema
       assert schema.properties.data."$ref" == "#/components/schemas/post"
       assert schema.properties.included.type == :array
+
       assert schema.properties.included.items.oneOf == [
                %Reference{"$ref": "#/components/schemas/tag"}
              ]
@@ -1160,6 +1209,7 @@ defmodule Test.Acceptance.OpenApiTest do
 
       assert Map.has_key?(attrs, "name_twice"),
              "calculations should appear in the read/response component schema"
+
       assert attrs["name_twice"] == %Schema{
                type: :string,
                nullable: true,
@@ -1271,11 +1321,13 @@ defmodule Test.Acceptance.OpenApiTest do
       shape_attr = content_schema.properties.attributes.properties["shape"]
       %{"oneOf" => one_of} = shape_attr
 
-      string_variant = Enum.find(one_of, fn
-        %{type: :string} -> true
-        %{"type" => "string"} -> true
-        _ -> false
-      end)
+      string_variant =
+        Enum.find(one_of, fn
+          %{type: :string} -> true
+          %{"type" => "string"} -> true
+          _ -> false
+        end)
+
       assert string_variant
     end
   end

@@ -492,7 +492,16 @@ defmodule AshJsonApi.JsonSchema do
     if json_api_type && attr_name do
       "#{json_api_type}_#{attr_name}_#{variant_name}"
     else
-      to_string(variant_name)
+      # Nested/generic results do not always have a resource namespace. Bare
+      # tags collide (e.g. marital-status "other" and card-brand "other").
+      namespace =
+        {resource, attr_name, attr[:type], attr[:constraints]}
+        |> :erlang.term_to_binary()
+        |> then(&:crypto.hash(:sha256, &1))
+        |> Base.encode16(case: :lower)
+        |> binary_part(0, 16)
+
+      "union_#{namespace}_#{variant_name}"
     end
   end
 
