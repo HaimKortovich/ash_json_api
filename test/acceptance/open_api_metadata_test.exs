@@ -150,6 +150,14 @@ defmodule Test.Acceptance.OpenApiMetadataTest do
     assert_valid!(ctx.document, "/metadata-items/custom", response("/metadata-items/custom"))
   end
 
+  test "deepObject query parameters explicitly declare exploded encoding", ctx do
+    parameters = ctx.document["paths"]["/metadata-items/offset"]["get"]["parameters"]
+    deep = Enum.filter(parameters, &(&1["style"] == "deepObject"))
+    assert Enum.any?(deep, &(&1["name"] == "page"))
+    assert Enum.any?(deep, &(&1["name"] == "fields"))
+    assert Enum.all?(deep, &(&1["explode"] == true))
+  end
+
   test "default error response describes the actual JSON:API envelope", ctx do
     conn = AshJsonApi.Test.get(Domain, "/metadata-items/#{Ash.UUID.generate()}", status: 404)
 

@@ -2145,6 +2145,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
             "Filters the query to results with attributes matching the given filter object",
           required: false,
           style: :deepObject,
+          explode: true,
           schema: %Reference{
             "$ref": "#/components/schemas/#{AshJsonApi.Resource.Info.type(resource)}-filter"
           }
@@ -2212,6 +2213,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 "Paginates the response with the limit and offset or keyset pagination.",
               required: action.pagination.required? && !action.pagination.default_limit,
               style: :deepObject,
+              explode: true,
               schema: %Schema{
                 type: :object,
                 additionalProperties: false,
@@ -2228,6 +2230,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 "Paginates the response with the limit and offset or keyset pagination.",
               required: action.pagination.required? && !action.pagination.default_limit,
               style: :deepObject,
+              explode: true,
               schema: keyset_pagination_schema(action.pagination)
             }
 
@@ -2239,6 +2242,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 "Paginates the response with the limit and offset or keyset pagination.",
               required: action.pagination.required? && !action.pagination.default_limit,
               style: :deepObject,
+              explode: true,
               schema: offset_pagination_schema(action.pagination)
             }
         end
@@ -2332,6 +2336,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
           description:
             "Paginates included relationships. Use included_page[relationship.path][limit], included_page[relationship.path][offset], or included_page[relationship.path][after] to paginate specific relationships. Available for: #{Enum.join(paginated_paths, ", ")}",
           style: :deepObject,
+          explode: true,
           schema: %Schema{
             type: :object,
             additionalProperties: true
@@ -2357,6 +2362,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         description: "Limits the response fields to only those listed for each type",
         required: false,
         style: :deepObject,
+        explode: true,
         schema: %Schema{
           type: :object,
           additionalProperties: %Schema{type: :string},
