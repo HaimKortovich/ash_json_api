@@ -31,6 +31,12 @@ defmodule AshJsonApi.Resource do
       doc: "A function to generate arbitrary top-level metadata for the JSON:API response",
       snippet: "fn ${1:subject}, ${2:result}, ${3:request} -> $4 end"
     ],
+    metadata_schema: [
+      type: {:map, :string, :any},
+      required: false,
+      doc:
+        "JSON Schema for the object returned by metadata. Declare properties, required fields and additionalProperties explicitly. Built-in pagination metadata is added by the generator. Without this declaration a custom callback's metadata remains open."
+    ],
     modify_conn: [
       type: {:fun, 4},
       required: false,

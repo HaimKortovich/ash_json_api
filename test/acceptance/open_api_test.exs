@@ -917,7 +917,7 @@ defmodule Test.Acceptance.OpenApiTest do
                      description: "An attributes object for a author"
                    },
                    id: %{type: :string},
-                   type: %Schema{type: :string},
+                   type: %Schema{type: :string, enum: ["author"]},
                    relationships: %Schema{
                      type: :object,
                      properties: %{
@@ -950,11 +950,13 @@ defmodule Test.Acceptance.OpenApiTest do
                    },
                    links: %Schema{
                      type: :object,
-                     additionalProperties: true
+                     additionalProperties: false,
+                     properties: %{self: %Schema{type: :string, nullable: false}}
                    },
                    meta: %Schema{
                      type: :object,
-                     additionalProperties: true
+                     additionalProperties: false,
+                     properties: %{keyset: %Schema{type: :string}}
                    }
                  },
                  additionalProperties: false,
@@ -1012,7 +1014,7 @@ defmodule Test.Acceptance.OpenApiTest do
                    description: "An attributes object for a post"
                  },
                  id: %{type: :string},
-                 type: %Schema{type: :string},
+                 type: %Schema{type: :string, enum: ["post"]},
                  relationships: %Schema{
                    type: :object,
                    properties: %{
@@ -1064,11 +1066,13 @@ defmodule Test.Acceptance.OpenApiTest do
                  },
                  links: %Schema{
                    type: :object,
-                   additionalProperties: true
+                   additionalProperties: false,
+                   properties: %{self: %Schema{type: :string, nullable: false}}
                  },
                  meta: %Schema{
                    type: :object,
-                   additionalProperties: true
+                   additionalProperties: false,
+                   properties: %{keyset: %Schema{type: :string}}
                  }
                },
                additionalProperties: false,

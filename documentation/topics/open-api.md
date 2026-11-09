@@ -113,6 +113,38 @@ To override any value in the OpenApi documentation you can use the `:modify_open
   end
 ```
 
+## Typed response metadata
+
+Built-in JSON:API document members are described from the serializer: `jsonapi.version`,
+resource `meta.keyset`, pagination `meta.page.total`, `limit`, and `offset`, and the
+known link names. Unknown keys are not accepted by these schemas. Page fields are
+optional because their presence depends on the pagination mode and count request;
+pagination links can be `null` when there is no next/previous page.
+
+Declare custom top-level metadata on the route using a string-keyed JSON Schema:
+
+```elixir
+index :read do
+  metadata fn _query, _result, _request -> %{"source" => "sales"} end
+  metadata_schema %{
+    "type" => "object",
+    "additionalProperties" => false,
+    "required" => ["source"],
+    "properties" => %{"source" => %{"type" => "string", "enum" => ["sales"]}}
+  }
+end
+```
+
+The OpenAPI generator preserves this schema's assertions and adds the built-in
+`page` property for paginated index routes. The serializer owns `page` and overwrites
+any callback value at that key. Use an inline object schema for paginated metadata.
+This declaration documents the callback's guarantee; it does not cast or validate
+the callback at runtime. Test real responses against the generated schema.
+
+A custom callback without `metadata_schema` remains explicitly open: the generator
+cannot infer arbitrary code's return type. Likewise, application-specific error
+diagnostic metadata and genuinely arbitrary map inputs must not be falsely closed.
+
 ## Inbound webhooks
 
 AshJsonApi generates the JSON:API document only. Inbound webhook routes,

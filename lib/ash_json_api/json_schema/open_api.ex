@@ -217,7 +217,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
           description: "General Error",
           content: %{
             "application/vnd.api+json" => %MediaType{
-              schema: %Reference{"$ref": "#/components/schemas/errors"}
+              schema: %Reference{"$ref": "#/components/schemas/error_document"}
             }
           }
         }
@@ -362,6 +362,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
           },
           uniqueItems: true
         },
+        "error_document" => %Schema{
+          type: :object,
+          additionalProperties: false,
+          required: [:errors, :jsonapi],
+          properties: %{
+            errors: %Reference{"$ref": "#/components/schemas/errors"},
+            jsonapi: jsonapi_schema()
+          }
+        },
         "error" => %Schema{
           type: :object,
           properties: %{
@@ -391,8 +400,12 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 "A human-readable explanation specific to this occurrence of the problem.",
               type: :string
             },
+            # Error implementations may attach application-specific diagnostics.
+            # Unlike built-in document metadata, these keys are not knowable here.
+            meta: %Schema{type: :object, nullable: true, additionalProperties: true},
             source: %Schema{
               type: :object,
+              additionalProperties: false,
               properties: %{
                 pointer: %Schema{
                   description:
@@ -427,17 +440,15 @@ if Code.ensure_loaded?(OpenApiSpex) do
         type: :object,
         required: [:type, :id],
         properties: %{
-          type: %Schema{type: :string},
+          type: %Schema{type: :string, enum: [AshJsonApi.Resource.Info.type(resource)]},
           id: %{type: :string},
           attributes: attributes_schema,
           relationships: relationships(resource),
-          links: %Schema{
-            type: :object,
-            additionalProperties: true
-          },
+          links: document_links([:self]),
           meta: %Schema{
             type: :object,
-            additionalProperties: true
+            additionalProperties: false,
+            properties: %{keyset: %Schema{type: :string}}
           }
         },
         additionalProperties: false
@@ -2203,6 +2214,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
               style: :deepObject,
               schema: %Schema{
                 type: :object,
+                additionalProperties: false,
                 properties: schema_props,
                 example: keyset_pagination_schema.example
               }
@@ -2236,6 +2248,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp offset_pagination_schema(pagination) do
       %Schema{
         type: :object,
+        additionalProperties: false,
         example: %{
           limit: pagination.default_limit || 25,
           offset: 0
@@ -2252,6 +2265,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
     defp keyset_pagination_schema(pagination) do
       %Schema{
         type: :object,
+        additionalProperties: false,
         example: %{
           limit: pagination.default_limit || 25
         },
@@ -2345,7 +2359,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         style: :deepObject,
         schema: %Schema{
           type: :object,
-          additionalProperties: true,
+          additionalProperties: %Schema{type: :string},
           example: %{
             type => example
           },
@@ -2896,6 +2910,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
     @spec response_schema(Route.t(), resource :: module, acc :: acc()) :: {Schema.t(), acc()}
     defp response_schema(route, resource, acc) do
+      action = Ash.Resource.Info.action(resource, route.action)
+
       case route.type do
         :route ->
           action = Ash.Resource.Info.action(resource, route.action)
@@ -2949,19 +2965,11 @@ if Code.ensure_loaded?(OpenApiSpex) do
                 uniqueItems: true
               },
               included: included_resource_schemas(resource),
-              links: %Schema{
-                type: :object,
-                additionalProperties: true
-              },
-              meta: %Schema{
-                type: :object,
-                additionalProperties: true
-              },
-              jsonapi: %Schema{
-                type: :object,
-                additionalProperties: true
-              }
-            }
+              links: document_links([:self, :first, :last, :prev, :next]),
+              meta: document_metadata(route, action),
+              jsonapi: jsonapi_schema()
+            },
+            required: [:data, :links, :jsonapi]
           }
 
           {schema, acc}
@@ -2989,26 +2997,72 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
         _ ->
           schema = %Schema{
+            type: :object,
             additionalProperties: false,
             properties: %{
               data: item_reference(route, resource),
               included: included_resource_schemas(resource),
-              links: %Schema{
-                type: :object,
-                additionalProperties: true
-              },
-              meta: %Schema{
-                type: :object,
-                additionalProperties: true
-              },
-              jsonapi: %Schema{
-                type: :object,
-                additionalProperties: true
-              }
-            }
+              links: document_links([:self]),
+              meta: document_metadata(route, action),
+              jsonapi: jsonapi_schema()
+            },
+            required: [:data, :links, :jsonapi]
           }
 
           {schema, acc}
+      end
+    end
+
+    defp jsonapi_schema do
+      %Schema{
+        type: :object,
+        additionalProperties: false,
+        required: [:version],
+        properties: %{version: %Schema{type: :string, enum: ["1.0"]}}
+      }
+    end
+
+    defp document_links(names) do
+      %Schema{
+        type: :object,
+        additionalProperties: false,
+        properties: Map.new(names, &{&1, %Schema{type: :string, nullable: &1 != :self}})
+      }
+    end
+
+    defp document_metadata(route, action) do
+      # A callback is arbitrary code: never infer its output from an example.
+      schema =
+        route.metadata_schema ||
+          %{
+            "type" => "object",
+            "properties" => %{},
+            "additionalProperties" => not is_nil(route.metadata)
+          }
+
+      unless schema["type"] == "object" and is_map(Map.get(schema, "properties", %{})) do
+        raise ArgumentError, "metadata_schema must be an object JSON Schema with string keys"
+      end
+
+      if route.type == :index and action.type == :read and action.pagination do
+        fields = %{
+          "total" => %{"type" => "integer", "minimum" => 0},
+          "limit" => %{"type" => "integer", "minimum" => 1}
+        }
+
+        fields =
+          if action.pagination.offset?,
+            do: Map.put(fields, "offset", %{"type" => "integer", "minimum" => 0}),
+            else: fields
+
+        page = %{"type" => "object", "additionalProperties" => false, "properties" => fields}
+
+        if Map.has_key?(schema, "$ref"),
+          do: raise(ArgumentError, "paginated metadata_schema must declare its object inline")
+
+        Map.update(schema, "properties", %{"page" => page}, &Map.put(&1, "page", page))
+      else
+        schema
       end
     end
 
