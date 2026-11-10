@@ -25,4 +25,12 @@ defmodule AshJsonApi.JsonSchemaPrimitiveTest do
 
     for invalid <- ["", "Test", "1.2.3", "12a"], do: refute(Regex.match?(regex, invalid), invalid)
   end
+
+  test "array length constraints become minItems/maxItems" do
+    assert %{"type" => "array", "minItems" => 3, "maxItems" => 3} =
+             AshJsonApi.JsonSchema.attribute_schema(%{
+               type: {:array, :string},
+               constraints: [min_length: 3, max_length: 3, items: []]
+             })
+  end
 end
