@@ -35,7 +35,7 @@ defmodule AshJsonApi.JsonSchema.Primitive do
       Ash.Type.Boolean -> {:ok, %{"type" => "boolean"}}
       Ash.Type.Integer -> {:ok, %{"type" => "integer"}}
       Ash.Type.Float -> {:ok, %{"type" => "number", "format" => "float"}}
-      Ash.Type.Decimal -> {:ok, %{"type" => "string"}}
+      Ash.Type.Decimal -> {:ok, decimal_schema()}
       Ash.Type.Date -> {:ok, %{"type" => "string", "format" => "date"}}
       Ash.Type.UtcDatetime -> {:ok, %{"type" => "string", "format" => "date-time"}}
       Ash.Type.UtcDatetimeUsec -> {:ok, %{"type" => "string", "format" => "date-time"}}
@@ -47,6 +47,16 @@ defmodule AshJsonApi.JsonSchema.Primitive do
       Ash.Type.DurationName -> {:ok, duration_name_schema()}
       _ -> :error
     end
+  end
+
+  # Decimals travel as strings; the pattern accepts what Decimal parsing accepts
+  # (sign, fraction, exponent) so clients know the string must be a number.
+  defp decimal_schema do
+    %{
+      "type" => "string",
+      "format" => "decimal",
+      "pattern" => "^[-+]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][-+]?[0-9]+)?$"
+    }
   end
 
   defp atom_schema(constraints) do

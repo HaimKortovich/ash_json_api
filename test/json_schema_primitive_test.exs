@@ -11,4 +11,18 @@ defmodule AshJsonApi.JsonSchemaPrimitiveTest do
       assert {:ok, %{"type" => "string", "format" => "date-time"}} = Primitive.schema(type)
     end
   end
+
+  test "decimals are numeric strings" do
+    assert {:ok, %{"type" => "string", "format" => "decimal", "pattern" => pattern}} =
+             Primitive.schema(:decimal)
+
+    regex = Regex.compile!(pattern)
+
+    for valid <- ["12", "-12.50", "+0.5", ".5", "1e3", "2.5E-4"] do
+      assert Regex.match?(regex, valid), valid
+      assert {:ok, _} = Ash.Type.cast_input(:decimal, valid)
+    end
+
+    for invalid <- ["", "Test", "1.2.3", "12a"], do: refute(Regex.match?(regex, invalid), invalid)
+  end
 end
