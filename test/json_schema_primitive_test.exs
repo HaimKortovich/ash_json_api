@@ -53,4 +53,27 @@ defmodule AshJsonApi.JsonSchemaPrimitiveTest do
 
     assert {:ok, %{"exclusiveMinimum" => 0}} = Primitive.schema(:float, greater_than: 0)
   end
+
+  test "error fields that are list indexes or string keys become JSON keys" do
+    defmodule NamedFields do
+      use Ash.Resource,
+        domain: nil,
+        validate_domain_inclusion?: false,
+        extensions: [AshJsonApi.Resource]
+
+      json_api do
+        type("named")
+        field_names(title: :heading)
+      end
+
+      attributes do
+        uuid_primary_key(:id)
+        attribute(:title, :string, public?: true)
+      end
+    end
+
+    assert AshJsonApi.Resource.Info.field_to_json_key(NamedFields, :title) == "heading"
+    assert AshJsonApi.Resource.Info.field_to_json_key(NamedFields, "0") == "0"
+    assert AshJsonApi.Resource.Info.field_to_json_key(NamedFields, 0) == "0"
+  end
 end

@@ -158,6 +158,11 @@ defmodule AshJsonApi.Resource.Info do
   Converts an Ash atom field name (attribute, calculation, aggregate) to its JSON:API
   string key, applying any `field_names` mapping configured on the resource.
   """
+  # Errors inside nested values can name a list index or a string key; those
+  # are not resource fields, so no mapping applies.
+  def field_to_json_key(_resource, field_name) when not is_atom(field_name),
+    do: to_string(field_name)
+
   def field_to_json_key(resource, field_name) do
     names = field_names(resource)
 
