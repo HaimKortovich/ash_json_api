@@ -660,15 +660,6 @@ defmodule AshJsonApi.JsonSchema do
     |> array_bounds(attr.constraints)
   end
 
-  # Array length constraints are enforced on input, so state them in the schema.
-  defp array_bounds(schema, constraints) do
-    constraints = constraints || []
-
-    schema
-    |> then(&if(min = constraints[:min_length], do: Map.put(&1, "minItems", min), else: &1))
-    |> then(&if(max = constraints[:max_length], do: Map.put(&1, "maxItems", max), else: &1))
-  end
-
   defp resource_attribute_type(%{type: Ash.Type.Union, constraints: constraints} = attr) do
     types = constraints[:types] || []
 
@@ -1572,5 +1563,14 @@ defmodule AshJsonApi.JsonSchema do
     else
       Ash.Type.embedded_type?(resource_or_type)
     end
+  end
+
+  # Array length constraints are enforced on input, so state them in the schema.
+  defp array_bounds(schema, constraints) do
+    constraints = constraints || []
+
+    schema
+    |> then(&if(min = constraints[:min_length], do: Map.put(&1, "minItems", min), else: &1))
+    |> then(&if(max = constraints[:max_length], do: Map.put(&1, "maxItems", max), else: &1))
   end
 end
