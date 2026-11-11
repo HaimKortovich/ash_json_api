@@ -33,4 +33,24 @@ defmodule AshJsonApi.JsonSchemaPrimitiveTest do
                constraints: [min_length: 3, max_length: 3, items: []]
              })
   end
+
+  test "string and number constraints are stated" do
+    assert {:ok,
+            %{"type" => "string", "minLength" => 2, "maxLength" => 9, "pattern" => "^[0-9]+$"}} =
+             Primitive.schema(:string, min_length: 2, max_length: 9, match: ~r/^[0-9]+$/)
+
+    assert {:ok, %{"pattern" => "^a$"}} =
+             Primitive.schema(:string, match: {Spark.Regex, :cache, ["^a$", ""]})
+
+    # Not expressible as an ECMAScript pattern: flags and \\A anchors.
+    assert {:ok, schema} = Primitive.schema(:string, match: ~r/^a$/i)
+    refute Map.has_key?(schema, "pattern")
+    assert {:ok, schema} = Primitive.schema(:string, match: ~r/\Aa/)
+    refute Map.has_key?(schema, "pattern")
+
+    assert {:ok, %{"type" => "integer", "minimum" => 1, "maximum" => 5}} =
+             Primitive.schema(:integer, min: 1, max: 5)
+
+    assert {:ok, %{"exclusiveMinimum" => 0}} = Primitive.schema(:float, greater_than: 0)
+  end
 end
