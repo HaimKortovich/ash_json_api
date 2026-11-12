@@ -368,9 +368,19 @@ defmodule AshJsonApi.JsonSchema do
   end
 
   defp add_id_field(map, resource) do
+    case primary_key_attribute(resource) do
+      nil -> map
+      attr -> Map.put(map, "id", resource_attribute_type(attr))
+    end
+  end
+
+  # Resource identifiers must state the primary key's real type. uuid primary
+  # keys are typed `"string"` with `"format" => "uuid"`; plain string keys
+  # keep their shape.
+  defp primary_key_attribute(resource) do
     case Ash.Resource.Info.primary_key(resource) do
-      [] -> map
-      _ -> Map.put(map, "id", %{"type" => "string"})
+      [name | _] -> Ash.Resource.Info.attribute(resource, name)
+      _ -> nil
     end
   end
 

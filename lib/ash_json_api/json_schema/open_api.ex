@@ -432,6 +432,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
     defp resource_object_schema(resource, fields, acc) do
       {attributes_schema, acc} = attributes(resource, fields, acc)
+      {id_schema, acc} = resource_id_schema(resource, acc)
 
       schema = %Schema{
         description:
@@ -441,7 +442,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         required: [:type, :id],
         properties: %{
           type: %Schema{type: :string, enum: [AshJsonApi.Resource.Info.type(resource)]},
-          id: %{type: :string},
+          id: id_schema,
           attributes: attributes_schema,
           relationships: relationships(resource),
           links: document_links([:self]),
@@ -455,6 +456,33 @@ if Code.ensure_loaded?(OpenApiSpex) do
       }
 
       {schema, acc}
+    end
+
+    # Resource identifiers must state the primary key's real type: uuid keys
+    # are `"format" => "uuid"` strings, so callers can pass the id where a
+    # uuid is expected. Falls back to a plain string.
+    defp resource_id_schema(resource, acc) do
+      {derived_id_schema(resource), acc}
+    end
+
+    defp derived_id_schema(resource) do
+      case primary_key_attribute(resource) do
+        nil ->
+          %Schema{type: :string}
+
+        attr ->
+          case AshJsonApi.JsonSchema.Primitive.schema(attr.type, attr.constraints) do
+            {:ok, schema} -> primitive_open_api_schema(schema)
+            :error -> %Schema{type: :string}
+          end
+      end
+    end
+
+    defp primary_key_attribute(resource) do
+      case Ash.Resource.Info.primary_key(resource) do
+        [name | _] -> Ash.Resource.Info.attribute(resource, name)
+        _ -> nil
+      end
     end
 
     @spec attributes(resource :: Ash.Resource.t(), fields :: nil | list(atom), acc :: acc) ::
@@ -1649,7 +1677,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
           ) :: Schema.t()
     defp resource_relationship_field_data(_resource, %{
            cardinality: :many,
-           name: name
+           name: name,
+           destination: destination
          }) do
       %Schema{
         description: "Relationship data for #{name}",
@@ -1661,7 +1690,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
           additionalProperties: false,
           properties: %{
             type: %Schema{type: :string},
-            id: %Schema{type: :string},
+            id: derived_id_schema(destination),
             meta: %Schema{
               type: :object,
               additionalProperties: true
@@ -1673,7 +1702,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
     end
 
     defp resource_relationship_field_data(_resource, %{
-           name: name
+           name: name,
+           destination: destination
          }) do
       %Schema{
         description: "An identifier for #{name}",
@@ -1683,7 +1713,7 @@ if Code.ensure_loaded?(OpenApiSpex) do
         additionalProperties: false,
         properties: %{
           type: %Schema{type: :string},
-          id: %Schema{type: :string},
+          id: derived_id_schema(destination),
           meta: %Schema{
             type: :object,
             additionalProperties: true

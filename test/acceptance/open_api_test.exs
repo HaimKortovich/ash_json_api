@@ -875,6 +875,16 @@ defmodule Test.Acceptance.OpenApiTest do
       refute operation.requestBody
     end
 
+    test "resource and relationship ids state the primary key format", %{
+      open_api_spec: %OpenApi{} = api_spec
+    } do
+      post = api_spec.components.schemas["post"]
+      assert post.properties.id == %Schema{type: :string, format: "uuid"}
+
+      identifier = post.properties.relationships.properties.author.properties.data.properties
+      assert identifier.id == %Schema{type: :string, format: "uuid"}
+    end
+
     test "embedded attribute types are expanded", %{open_api_spec: %OpenApi{} = api_spec} do
       %Operation{} = operation = api_spec.paths["/authors"].get
       response = operation.responses[200]
@@ -916,7 +926,7 @@ defmodule Test.Acceptance.OpenApiTest do
                      additionalProperties: false,
                      description: "An attributes object for a author"
                    },
-                   id: %{type: :string},
+                   id: %Schema{type: :string, format: "uuid"},
                    type: %Schema{type: :string, enum: ["author"]},
                    relationships: %Schema{
                      type: :object,
@@ -931,7 +941,7 @@ defmodule Test.Acceptance.OpenApiTest do
                                description: "Resource identifiers for posts",
                                required: [:type, :id],
                                properties: %{
-                                 id: %Schema{type: :string},
+                                 id: %Schema{type: :string, format: "uuid"},
                                  meta: %Schema{
                                    type: :object,
                                    additionalProperties: true
@@ -1013,7 +1023,7 @@ defmodule Test.Acceptance.OpenApiTest do
                    additionalProperties: false,
                    description: "An attributes object for a post"
                  },
-                 id: %{type: :string},
+                 id: %Schema{type: :string, format: "uuid"},
                  type: %Schema{type: :string, enum: ["post"]},
                  relationships: %Schema{
                    type: :object,
@@ -1024,7 +1034,7 @@ defmodule Test.Acceptance.OpenApiTest do
                            required: [:type, :id],
                            type: :object,
                            properties: %{
-                             id: %Schema{type: :string},
+                             id: %Schema{type: :string, format: "uuid"},
                              meta: %Schema{
                                type: :object,
                                additionalProperties: true
@@ -1047,7 +1057,7 @@ defmodule Test.Acceptance.OpenApiTest do
                              description: "Resource identifiers for tags",
                              required: [:type, :id],
                              properties: %{
-                               id: %Schema{type: :string},
+                               id: %Schema{type: :string, format: "uuid"},
                                meta: %Schema{
                                  type: :object,
                                  additionalProperties: true
