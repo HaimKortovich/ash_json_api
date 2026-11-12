@@ -792,6 +792,12 @@ defmodule AshJsonApi.JsonSchema do
 
   defp legacy_primitive_schema(type, schema) do
     case Ash.Type.get_type(type) do
+      Ash.Type.Decimal ->
+        # Keep accepting the JSON numbers accepted by Ash's decimal cast and
+        # existing request clients. OpenAPI still advertises the lossless
+        # decimal-string representation through Primitive.schema/2.
+        %{"anyOf" => [schema, %{"type" => "number"}]}
+
       Ash.Type.Boolean ->
         Map.merge(schema, %{
           "type" => ["boolean", "string"],

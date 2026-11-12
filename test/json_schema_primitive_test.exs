@@ -26,6 +26,23 @@ defmodule AshJsonApi.JsonSchemaPrimitiveTest do
     for invalid <- ["", "Test", "1.2.3", "12a"], do: refute(Regex.match?(regex, invalid), invalid)
   end
 
+  test "request decimal validation retains numeric compatibility without accepting arbitrary strings" do
+    schema =
+      AshJsonApi.JsonSchema.attribute_schema(%{type: :decimal, constraints: []})
+      |> JsonXema.new()
+
+    for value <- [60_000, 12.5, "60000.00", "1e3"] do
+      assert :ok = JsonXema.validate(schema, value)
+      assert {:ok, _} = Ash.Type.cast_input(:decimal, value)
+    end
+
+    for value <- ["invalid", "", "12a", true, %{}] do
+      assert {:error, _} = JsonXema.validate(schema, value)
+    end
+
+    assert {:ok, %{"type" => "string", "format" => "decimal"}} = Primitive.schema(:decimal)
+  end
+
   test "array length constraints become minItems/maxItems" do
     assert %{"type" => "array", "minItems" => 3, "maxItems" => 3} =
              AshJsonApi.JsonSchema.attribute_schema(%{
